@@ -1,0 +1,83 @@
+⍝ Bunda-Gerth definitions for a dfns-like language, in which:
+⍝ - An expression may evaluate to:
+⍝ - - An Array,
+⍝ - - A Function,
+⍝ - - An Operator,
+⍝ - - A dyadic function bound (curried) with its left argument,
+⍝ - - A dyadic operator bound (curried) with its right operand,
+⍝ - - A train of arrays and functions with a function as rightmost item.
+⍝ - The result of any expression may be named.
+⍝ - Only an Array expression may be guarded.
+⍝ - A diamond-separated expression list must terminate in an Array expression.
+⍝ 
+⍝ See https://dfns.dyalog.com/s_parse.htm
+⍝
+⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝ Categories:
+A a b c  0 1 2 3 4 5 6 7 8 9  ⍺ ⍵  #    ⍝ Arrays
+F + - × ÷ ⍳ ⍴ = | ↑ ↓ ⊢ ⊣ ∇             ⍝ Functions
+N x y z                                 ⍝ Names (unassigned).
+H / ⌿ \ ⍀                               ⍝ Hybrid function/operators
+AF                                      ⍝ bound left argument
+JOT ∘                                   ⍝ compose / null operand.
+DOT .                                   ⍝ ref / product.
+DX                                      ⍝ dotted ...
+MOP ¨ ⍨ &                               ⍝ Monadic operators
+DOP ⍣                                   ⍝ Dyadic operators
+IDX                                     ⍝ index/axis
+XAS                                     ⍝ indexed assignment: [IDX]←
+SL  ;                                   ⍝ subscript list  ..;..;..
+CLN :                                   ⍝ colon token
+GRD                                     ⍝ guard :
+XL  ⋄                                   ⍝ expression list ..⋄..⋄..
+ARO ←                                   ⍝ assignment arrow
+ASG                                     ⍝ name assignment
+ERR                                     ⍝ error
+() [IDX] {F}                            ⍝ brackets
+
+⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝ Macros:
+fun=F.H                 ⍝ function
+rand=A.fun.AF.N         ⍝ operand
+thing=rand.MOP.DOP.JOT  ⍝ nameable object
+
+⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝ Bindings:
+DX:thing→thing          ⍝ dotted expression.
+
+A:DOT→DX                ⍝ dotted expression
+
+N:ARO→ASG               ⍝ name to assignment arrow
+IDX:ARO→XAS             ⍝ indexed assign ]←
+
+N:XAS→ASG               ⍝ n[x]←
+
+A:A→A                   ⍝ array stranding
+N:N→N                   ⍝ name stranding
+DOT:A→ERR               ⍝   to prevent #.a+b → #.(a+b)
+
+rand:MOP→F              ⍝ monadic and
+DOP:rand→MOP            ⍝ ... dyadic operators
+fun:H→F                 ⍝ hybrid as operator
+DOT:fun→MOP             ⍝ inner product
+JOT:MOP→F DOP:JOT→MOP   ⍝ jot-as-null: outer product
+JOT:rand→MOP            ⍝ compose
+rand:IDX→rand           ⍝ axis / index
+MOP:H→ERR               ⍝   top prevent +¨/¨ → (+¨)(/¨)
+
+A:fun→AF                ⍝ left argument to its function
+IDX:A.fun→ERR           ⍝   to prevent v[0]+1 → v[0](+1)
+
+F.AF:A→A                ⍝ function to its right argument
+
+fun.AF:F→F  F.AF:AF→F   ⍝ function trains
+
+A.SL:SL→SL SL:A→SL      ⍝ subscript list: [2;] [2;;]
+
+ASG:thing→thing         ⍝ naming leaves / as hybrid
+ASG:DOT→DOP             ⍝ naming fixes  . as product
+
+A:CLN→GRD               ⍝ guard expr is a bool scalar
+GRD:A→A                 ⍝ guard returns an Array.
+CLN:A→ERR               ⍝   to prevent: 1:2⋄ → 1:(2⋄)
+ARO:thing→ERR           ⍝   to prevent a←1⋄2 → a←(1⋄2)
+
+thing.DOT.XL:XL→XL      ⍝ leading side-effect thing-expressions
+XL:A→A                  ⍝ expression list returns only an array
