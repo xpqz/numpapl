@@ -12,12 +12,19 @@ See
 from functools import reduce
 import re
 from string import ascii_letters, whitespace
-from typing import Any
+from typing import Any, Callable, Optional, TypeAlias
 
 import numpy as np
 
+from environment import Env
+from primitives import Voc
+
+APLTYPE: TypeAlias = np.ndarray|int|float|complex|str
+
 class APLParser:
-    def __init__(self):
+    def __init__(self, parse_only: bool=False):
+        self.parse_only = parse_only
+
         self.functions = '+-×÷*=≥>≠∨∧⍒⍋⌽⍉⊖⍟⍱⍲!?∊⍴~↑↓⍳○*⌈⌊∇⍎⍕⊃⊂∩∪⊥⊤|≡≢,⍪⊆⌹'
         self.hybrids = '/⌿\⍀'
         self.monadic_operators = '⌸¨⍨'
@@ -33,13 +40,11 @@ class APLParser:
             'CLN', 'GRD', 'XL', 'ARO', 
             'ASG', 'ERR'
         ]
-        
-        # Bracket pairs
-        self.bkts = [
-            '(', ')', 
-            '[', ']', 
-            '{', '}'
-        ]
+        self.ctab = dict([(c, i) for (i, c) in enumerate(self.cats)])
+
+        # Brackets
+        self.bkts = '()[]{}'
+        self.bkt_pairs = ['()', '[]', '{}']
         self.lbs = ['(', '[', '{']
         self.rbs = [')', ']', '}']
         self.blabs = ['', 'IDX', 'F'] # Bracket labels: what's enclosed by each pair type?
@@ -100,6 +105,9 @@ class APLParser:
         self.xmat = np.pad(self.bmat, ((1, 1), (1, 1)), 'constant') # Extended bmat: pad with zeros in x and y
 
     def classify(self, src: str) -> list[tuple]:
+        """
+        Tokeniser. Classify each atom as a tuple of (category, atom).
+        """
         i = 0
         pairs: list[tuple] = []
         while i<len(src):
@@ -119,30 +127,30 @@ class APLParser:
                 i, num = getnum(src, i)
                 pairs.append((0, num))
                 continue
-            elif ch in ascii_letters+"⎕_": # Named arrays, functions or operators
+            elif ch in ascii_letters+"⎕_": # A variable name
                 i, name = getname(src, i)
-                pairs.append((self.cats.index('N'), name))
+                pairs.append((self.ctab['N'], name))
                 continue
             elif ch in self.functions:
-                pairs.append((self.cats.index('F'), ch))     # Primitive function
+                pairs.append((self.ctab['F'], ch))     # Primitive function
             elif ch in self.hybrids:
-                pairs.append((self.cats.index('H'), ch))     # Hybrid function/operator
+                pairs.append((self.ctab['H'], ch))     # Hybrid function/operator
             elif ch in self.monadic_operators:          
-                pairs.append((self.cats.index('MOP'), ch))   # Primitive monadic operator
+                pairs.append((self.ctab['MOP'], ch))   # Primitive monadic operator
             elif ch in self.dyadic_operators:
-                pairs.append((self.cats.index('DOP'), ch))   # Primitive dyadic operator
+                pairs.append((self.ctab['DOP'], ch))   # Primitive dyadic operator
             elif ch == '∘':
-                pairs.append((self.cats.index('JOT'), ch))   # Jot: compose / null operand
+                pairs.append((self.ctab['JOT'], ch))   # Jot: compose / null operand
             elif ch == ';':
-                pairs.append((self.cats.index('LST'), ch))   # Subscript list separator
+                pairs.append((self.ctab['LST'], ch))   # Subscript list separator
             elif ch == ':':
-                pairs.append((self.cats.index('CLN'), ch))   # Expression list separator
+                pairs.append((self.ctab['CLN'], ch))   # Expression list separator
             elif ch == '⋄':
-                pairs.append((self.cats.index('XL'), ch))    # Colon for guard
+                pairs.append((self.ctab['XL'], ch))    # Colon for guard
             elif ch == '.':
-                pairs.append((self.cats.index('DOT'), ch))   # Dot: ref / product
+                pairs.append((self.ctab['DOT'], ch))   # Dot: ref / product
             elif ch == '←':
-                pairs.append((self.cats.index('ARO'), ch))   # Assignment arrow
+                pairs.append((self.ctab['ARO'], ch))   # Assignment arrow
             elif ch in '⍺⍵':
                 pairs.append((0, ch))                        # Dfn arg arrays
             i += 1
@@ -157,7 +165,10 @@ class APLParser:
         }                             ⍝ :: left_bkt ∇ node → node
         """
         cat, expr = t
-        zcat = ([cat]+self.bcats[1:])[self.lbs.index(bracket)]
+        try: # Note: in APL, lbs⍳⍺ will not error if ⍺ isn't present, but instead default to 1+last index of lbs
+            zcat = ([cat]+self.bcats[1:])[self.lbs.index(bracket)]
+        except ValueError:
+            zcat = ([cat]+self.bcats[1:])[len(self.lbs)]
 
         return (zcat, (bracket, expr))
     
@@ -189,11 +200,11 @@ class APLParser:
         B, b = _unpack(Bb)
         C, c = _unpack(Cc)
 
-        if a in self.bkts[2:] and b in self.bkts[2:]: # empty brackets []
+        if type(a) == str and a in self.bkt_pairs[2:] and type(b) == str and b in self.bkt_pairs[2:]: # empty brackets []
             return self.bind((rgt((D_, L)), Aa, self.ebk(b), R, _D)) # rgt(∆_ L)Aa(ebk b)R _∆
         
-        if a in self.bkts and c in self.bkts: # bracketed single value Bb
-            return self.bind((D_, L, self.bkt(a, Bb), R, _D))  # (⊂a c)∊bkts:∇ rgt ∆_ L(a bkt Bb)R _∆
+        if type(a) == str and type(c) == str and a+c in self.bkt_pairs: # bracketed single value Bb
+            return self.bind(rgt((D_, L, self.bkt(a, Bb), R, _D)))  # (⊂a c)∊bkts:∇ rgt ∆_ L(a bkt Bb)R _∆
         
         if a in self.rbs: # right bracket: skip left.
             return self.bind(lft(lft(stream))) # (⊂a)∊rbs:∇ lft lft ⍵
@@ -201,9 +212,12 @@ class APLParser:
         if self.xmat[(A+1, B+1)] >= self.xmat[(B+1, C+1)]: # A:B ≥ B:C → skip left.
             return self.bind(lft(stream)) 
 
-        BbCc = (self.zmat[(B, C)], (b, c)) # BbCc←zmat[B;C],⊂b c ⍝ B bound with C. This is the eval hook
+        if self.parse_only:
+            BbCc = (self.zmat[(B, C)], (b, c)) # BbCc←zmat[B;C],⊂b c ⍝ B bound with C.
+        else:
+            BbCc = self.eval(B, C, b, c) # type: ignore
         return self.bind(((D_, L), Aa, BbCc, R, _D)) # binds with token to the right?
-
+    
     def parse(self, src: str):
         pairs = self.classify(src)
         eos = -1
@@ -215,8 +229,200 @@ class APLParser:
         Aa, Bb, Cc = (eos, eos, *pairs, eos)[-3:] # 3-token window
         return self.bind((D_, Aa, Bb, Cc, eos))
     
+    def run(self, src: str) -> np.ndarray|Callable:
+        tok = self.parse(src)
+        if len(tok) == 1:
+            if tok[0][0] == 0:
+                if type(tok[0][1]) == np.ndarray:
+                    return tok[0][1]
+                elif type(tok[0][1]) == tuple and callable(tok[0][1][0]):
+                    return tok[0][1][0](None, tok[0][1][1])
+                
+        raise NotImplementedError(f"Unrecognized token: {tok}")
+
+    def array_(self, rcat: int, C: int, b: Any, c: Any) -> tuple:
+        if C == self.ctab['A']:             # A:A -> 9 A  ⍝ Strand
+            return (rcat, strand(b, c))
+        
+        if C == self.ctab['F']:             # A:F -> 7 AF ⍝ Left-side curried dyadic fun
+            return (rcat, curry(b, Voc.get_fn(c)))
+        
+        if C == self.ctab['H']:             # A:H -> 7 AF ⍝ Left-side curried dyadic hybrid
+            return (rcat, curry(b, Voc.get_hyb(c)[0])) # Function version of hybrid
+        
+        if C == self.ctab['DOT']:           # A:DOT -> 12 DX ⍝ Array to a dotted something
+            raise NotImplementedError
+        
+        if C == self.ctab['MOP']:           # A:MOP -> 7 F ⍝ Derived fun from monadic op with array operand
+            return (rcat, derive_function(Env.resolve(b), Voc.get_mop(c)))
+        
+        if C == self.ctab['IDX']:           # A:IDX -> 8 A ⍝ Array bracket index
+            return (rcat, array_index(b, c[1]))
+        
+        if C == self.ctab['SL']:            # A:SL -> 4 SL ⍝ Semi-colon-sep subscript list
+            return (rcat, subscript_list(b, c))
+        
+        if C == self.ctab['CLN']:           # A:CLN -> 2 GRD ⍝ Guard
+            raise NotImplementedError
+        
+        if C == self.ctab['XL']:            # A:XL -> 1 XL ⍝ Diamond
+            return (rcat, c) # Value of diamond list is value of last item
+        
+        raise NotImplementedError(f"Unknown category: {C}")
+    
+    def fun_(self, rcat: int, C: int, b: Any, c: Any) -> tuple:
+        if C == self.ctab['A']:        # F:A -> 6 A  ⍝ Monadic function application
+            return (rcat, apply(_fun_ref(b), c))
+        
+        if C == self.ctab['F']:        # F:F -> 8 F  ⍝ Derived function, atop
+            return (rcat, atop(_fun_ref(b), _fun_ref(c)))
+        
+        if C == self.ctab['H']:        # F:H -> 8 F  ⍝ Mondadic hybrid operator with bound left function operand
+            return (rcat, derive_function(_fun_ref(b), Voc.get_hyb(c)[1]))
+        
+        if C == self.ctab['AF']:       # F:AF -> 5 F  ⍝ Atop
+            return (rcat, atop(_fun_ref(b), _fun_ref(c)))
+        
+        if C == self.ctab['MOP']:      # F:MOP -> 8 F  ⍝ Mondadic operator with bound left function operand
+            return (rcat, derive_function(_fun_ref(b), Voc.get_mop(c)))
+        
+        if C == self.ctab['IDX']:      # F:IDX -> 8 F  ⍝ Bracket axis applied to function
+            raise NotImplementedError('NYI ERROR: bracket axis')
+        
+        if C == self.ctab['XL']:       # F:XL -> 1 XL ⍝ Diamond
+            return (rcat, c) # Value of diamond list is value of last item
+        
+        raise NotImplementedError(f"Unknown category: {C}")
+
+    def name_(self, rcat: int, C: int, b: Any, c: Any) -> tuple:
+        if C == self.ctab['N']:        # N:N -> 9 N  ⍝ Name stranding
+            return (rcat, strand(b, c))
+        
+        if C == self.ctab['MOP']:      # N:MOP -> 8 F  ⍝ Mondadic operator with bound left name operand
+            return (rcat, derive_function(_fun_ref(b), Voc.get_mop(c)))
+        
+        if C == self.ctab['IDX']:           # N:IDX -> 8 N Name bracket index/axis
+            ref = Env.resolve(b)
+            if type(ref) == np.ndarray:
+                return (rcat, array_index(ref, c[1]))
+            else:
+                raise NotImplementedError('NYI ERROR: bracket axis')
+            
+        if C == self.ctab['XAS']:       # N:XAS -> 10 ASG  ⍝ Indexed assign: n[x]←
+            raise NotImplementedError('NYI ERROR: indexed assign')
+        
+        if C == self.ctab['XL']:       # N:XL -> 1 XL ⍝ Diamond
+            return (rcat, c) # Value of diamond list is value of last item
+        
+        if C == self.ctab['ARO']:       # N:ARO -> 11 ASG  ⍝ Assign: n←
+            Env.set(b, c)
+            return (rcat, c) # How do we do shy?
+                    
+        raise NotImplementedError(f"Unknown category: {C}")
+    
     def eval(self, B: int, C: int, b: Any, c: Any) -> tuple:
-        pass
+        """
+        Evaluate the expression b c
+        """
+        rcat = self.zmat[(B, C)]
+        
+        #---------- LEFT IS ARRAY -----------------
+        if B == self.ctab['A']:
+            return self.array_(rcat, C, b, c)
+
+        #---------- LEFT IS FUNCTION --------------
+        elif B == self.ctab['F']:
+            return self.fun_(rcat, C, b, c)
+        
+        #---------- LEFT IS NAME - ----------------
+        elif B == self.ctab['N']:
+            return self.name_(rcat, C, b, c)
+                
+        return (rcat, (b, c))
+
+def _simple_scalar(e: Any) -> bool:
+    return isinstance(e, (int, float, complex, str))
+
+def _payload(e: Any) -> APLTYPE:
+    if type(e) == tuple:
+        return e[1]
+    return e
+
+def _fun_ref(f: Any) -> Callable:
+    if callable(f):
+        return f
+    return Voc.get_fn(f)
+            
+def strand(left: tuple|APLTYPE, right: tuple|APLTYPE) -> np.ndarray:
+    # Flat strand of two simple scalars: 1 2
+    if _simple_scalar(left) and _simple_scalar(right): 
+        return np.hstack((left, right)) 
+    
+    # Flat strand of more than two simple scalars: 1 2 3
+    if type(left) == np.ndarray and _simple_scalar(right):
+        return np.hstack((left, right))
+    
+    if _simple_scalar(left) and type(right) == np.ndarray:
+        return np.hstack((left, right))
+    
+    # Flat, bracketed, strand of two simple scalars: (1)(2)
+    if (type(left) == tuple and type(right) == tuple and 
+        _simple_scalar(left[1]) and _simple_scalar(right[1])):
+        return np.hstack((left[1], right[1]))
+    
+    # Nested: (1 2 3)(4 5 6)
+    nested = np.empty(2, dtype=object)
+    nested[:] = [_payload(left), _payload(right)] # type: ignore
+    return nested
+
+def curry(left: np.ndarray, right: Callable) -> Callable:
+    return lambda _, omega: right(left, omega)
+
+def derive_function(left: np.ndarray|Callable, right: Callable) -> Callable:
+    """
+    Right is a monadic operator. Left is array or function. Bind the left operand, 
+    and return a function
+
+    Operators have the signature:
+
+    def op(aa: np.ndarray|Callable, ww: Optional[np.ndarray|Callable], alpha: Optional[np.ndarray],  omega: np.ndarray)
+
+    `derive_function` binds aa
+    """
+    return lambda alpha, omega: right(left, None, alpha, omega) # type: ignore
+
+def array_index(left: np.ndarray, right: tuple|int) -> np.ndarray:
+    """
+    APL bracket index. Note: right is a subscript list or simple int scalar
+    """
+    return left[right] # maybe?
+
+def subscript_list(left: tuple, right: tuple) -> tuple:
+    """
+    A subscript list is a tuple containing integers or other tuples.
+
+        (1, (2, (3, 4)))
+
+    each element representing selection crietria from a given axis.
+
+    This function adds a new leading axis to the subscript list.
+    """
+    return left, *right
+
+def apply(left: Callable, right: np.ndarray) -> np.ndarray:
+    return left(None, right)
+
+def atop(left: Callable, right: Callable) -> Callable:
+    """
+    -⍤÷ 4      ⍝ (  f⍤g y) ≡  f   g y
+    ¯0.25
+
+    12 -⍤÷ 4   ⍝ (x f⍤g y) ≡ (f x g y)
+    ¯3
+    """
+    def derived(alpha: Optional[np.ndarray], omega: np.ndarray) -> np.ndarray:
+        return left(None, right(alpha, omega))
+    return derived
 
 def rgt(stream: tuple) -> tuple:
     """
@@ -266,18 +472,18 @@ def skip_comment(src: str, i: int) -> int:
         i += 1
     return i
 
-def getstring(src: str, idx: int) -> tuple[int, str]:
+def getstring(src: str, idx: int) -> tuple[int, np.ndarray]:
     m = re.match(r"'((?:''|[^'])*)'", src[idx:]) # Note: APL escapes single quotes with single quotes
     if not m:
         raise SyntaxError("SYNTAX ERROR: Unpaired quote")
     data = m.group(1)
-    return (2+idx+len(data), data.replace("''", "'"))
+    return (2+idx+len(data), np.array(list(data.replace("''", "'"))))
 
 def get_cmplx(tok: str) -> complex:
     parts = tok.split('J')
     if len(parts) != 2:
         raise SyntaxError('SYNTAX ERROR: malformed complex scalar')
-    (re, im) = parts
+    re, im = parts
     try:
         cmplx = complex(float(re), float(im))
     except TypeError:
@@ -290,14 +496,14 @@ def getnum(src: str, idx: int) -> tuple[int, int|float|complex]:
     m = re.match(r"[¯0-9eEjJ.]+", src[idx:])
     if not m:
         raise SyntaxError('SYNTAX ERROR: malformed numeric scalar')
-    tok = m.group(0).upper()
-    tok = tok.replace('¯', '-')
+    tok = m.group(0).upper().replace('¯', '-')
     if 'J' in tok:
-        return (idx+len(tok), get_cmplx(tok))
-    if '.' in tok:
+        val = get_cmplx(tok)
+    elif '.' in tok:
         val = float(tok)
     else:
         val = int(tok)
+    # return (idx+len(tok), np.array(val))
     return (idx+len(tok), val)
 
 def getname(src: str, idx: int) -> tuple[int, str]:
@@ -311,6 +517,17 @@ def getname(src: str, idx: int) -> tuple[int, str]:
 
 if __name__ == "__main__":
     src = '{⍺+⍵}/⍳5'
-    p = APLParser()
+    src = '(1 2 3 4)(5)'
+    src = '1 2 3 4[1]'
+    src = '1 2 3 4[1 0]'
+    src = '+/1 2 3 4' # not yet
+    src = '0 1 0 1/1 2 3 4'
+    src = '-+'
+    src = '5+7'
+    src = '1 +⍨ 2'
+    src = 'a (+⍤1 0) b'
+    src = 'a[1] b[2] c[3]'
+    src = '(a[1] b)[1]'
+    p = APLParser(parse_only=True)
     ast = p.parse(src)
     print(ast)
