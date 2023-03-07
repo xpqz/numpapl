@@ -1,12 +1,23 @@
 """
-This is a python port of the interesting bits of the APL 
+This is a Python port of the interesting bits of the APL 
 parser given in the Dyalog dfns workspace (most likely due 
 to John Scholes):
 
     https://dfns.dyalog.com/n_parse.htm
 
+plus an interpreter atop NumPy. The parser implements a version
+of the Bunda-Gerth algorithm, which is described here:
+
+    https://dl.acm.org/doi/pdf/10.1145/384283.801081
+
 See 
     https://dfns.dyalog.com/s_parse.htm for the actual grammar.
+
+In a typical APL interpreter, the boundary between parsing and
+interpretation is a bit blurry. The 'grammar' isn't context-free.
+The reduction step in the Bunda-Gerth algorithm is the point 
+where an expression can be evaluated, so there is no need to 
+build an explicit AST.
 
 """
 from functools import reduce
@@ -21,25 +32,41 @@ from primitives import Voc
 
 APLTYPE: TypeAlias = np.ndarray|int|float|complex|str
 
-class APLParser:
+class APL:
     def __init__(self, parse_only: bool=False):
         self.parse_only = parse_only
 
-        self.functions = '+-×÷*=≥>≠∨∧⍒⍋⌽⍉⊖⍟⍱⍲!?∊⍴~↑↓⍳○*⌈⌊∇⍎⍕⊃⊂∩∪⊥⊤|≡≢,⍪⊆⌹'
+        self.functions = '+-×÷*=≥>≠∨∧⍒⍋⌽⍉⊖⍟⍱⍲!?∊⍴~↑↓⍳○*⌈⌊∇⍎⍕⊃⊂∩∪⊣⊢⊥⊤|≡≢,⍪⊆⌹'
         self.hybrids = '/⌿\⍀'
         self.monadic_operators = '⌸¨⍨'
         self.dyadic_operators = '⍣⌺@⍥⍤'
         
-        # Grammar categories
-        # Note: order matters! The Bunda-Gerth binding tables below rely on
-        # this order.
+        # Grammar categories.
+        # Note: the ordering is significant! The Bunda-Gerth binding tables 
+        # below rely on this order.
         self.cats = [
-            'A', 'F', 'N', 'H', 'AF', 
-            'JOT', 'DOT', 'DX', 'MOP', 
-            'DOP', 'IDX', 'XAS', 'SL', 
-            'CLN', 'GRD', 'XL', 'ARO', 
-            'ASG', 'ERR'
+            'A',   # Arrays
+            'F',   # Functions
+            'N',   # Names (unassigned)
+            'H',   # Hybrid function/operators
+            'AF',  # Functions with curried left argument
+            'JOT', # Compose/null operand
+            'DOT', # Reference/product
+            'DX',  # Dotted ...
+            'MOP', # Monadic operators
+            'DOP', # Dyadic operators
+            'IDX', # Bracket indexing/axis specification
+            'XAS', # Indexed assignment [IDX]←
+            'SL',  # Subscript list ..;..;..
+            'CLN', # Colon token
+            'GRD', # Guard
+            'XL',  # Expression list ..⋄..⋄..
+            'ARO', # Assignment arrow ←
+            'ASG', # Name assignment
+            'ERR'  # Error
         ]
+
+        # Lookup table for category indexing.
         self.ctab = dict([(c, i) for (i, c) in enumerate(self.cats)])
 
         # Brackets
@@ -48,7 +75,7 @@ class APLParser:
         self.lbs = ['(', '[', '{']
         self.rbs = [')', ']', '}']
         self.blabs = ['', 'IDX', 'F'] # Bracket labels: what's enclosed by each pair type?
-        self.bcats = [19, 10, 1]      # Bracket label indices in to self.cats
+        self.bcats = [19, 10, 1]      # Bracket label indices into self.cats
         
         # Bunda-Gerth binding strenghts.
         # The 9 at 0, 0 means that if a category 0 element (array) is bound
@@ -76,7 +103,7 @@ class APLParser:
             [ 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
         ])
 
-        # Bunda-Gerth result categories
+        # Bunda-Gerth result categories.
         # The 0 at 0, 0 means that if a category 0 element (array) is bound
         # to a category 0 element (array) -- stranding, then the resulting category
         # is 0 -- an array.
@@ -102,11 +129,13 @@ class APLParser:
             [ 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
         ])
 
-        self.xmat = np.pad(self.bmat, ((1, 1), (1, 1)), 'constant') # Extended bmat: pad with zeros in x and y
+        # Extended bmat: pad with zeros in x and y
+        self.xmat = np.pad(self.bmat, ((1, 1), (1, 1)), 'constant') 
 
     def classify(self, src: str) -> list[tuple]:
         """
-        Tokeniser. Classify each atom as a tuple of (category, atom).
+        Tokeniser. Classify each atom as a tuple of (category, atom). Converts character
+        vectors to numpy arraysm and numbers to proper numerics.
         """
         i = 0
         pairs: list[tuple] = []
@@ -123,6 +152,8 @@ class APLParser:
                 i, s = getstring(src, i)
                 pairs.append((0, s))
                 continue
+            elif ch == "⍬":
+                pairs.append((0, ch))
             elif ch == '¯' or ch.isdigit() or ch == '.' and peek(src, i).isdigit():
                 i, num = getnum(src, i)
                 pairs.append((0, num))
@@ -152,12 +183,15 @@ class APLParser:
             elif ch == '←':
                 pairs.append((self.ctab['ARO'], ch))   # Assignment arrow
             elif ch in '⍺⍵':
-                pairs.append((0, ch))                        # Dfn arg arrays
+                pairs.append((0, ch))                  # Dfn arg arrays
             i += 1
         return pairs
     
     def bkt(self, bracket: str, t: tuple) -> tuple:
         """
+        Classify node `t` based on it being enclosed by bracket-type
+        `bracket`. This does the job of the following APL function:
+
         bkt ← {                       ⍝ bind of bracketed node [ ⍵ ].
             (cat expr)←⍵              ⍝ category of bracketed expr.
             zcat←(cat,1↓bcats)[lbs⍳⍺] ⍝ resulting category.
@@ -165,12 +199,17 @@ class APLParser:
         }                             ⍝ :: left_bkt ∇ node → node
         """
         cat, expr = t
-        try: # Note: in APL, lbs⍳⍺ will not error if ⍺ isn't present, but instead default to 1+last index of lbs
+        # Note: in APL, `lbs⍳⍺` will not error if `⍺` isn't present, but instead 
+        # default to 1+last index of `lbs`.
+        try: 
             zcat = ([cat]+self.bcats[1:])[self.lbs.index(bracket)]
         except ValueError:
             zcat = ([cat]+self.bcats[1:])[len(self.lbs)]
 
-        return (zcat, (bracket, expr))
+        if self.parse_only:
+            return (zcat, (bracket, expr))
+        else:
+            return zcat, expr
     
     def ebk(self, bracket: str) -> tuple:
         """
@@ -182,17 +221,21 @@ class APLParser:
         return (self.bcats[self.lbs.index(bracket)], bracket)
     
     def bind(self, stream: tuple) -> tuple:
+        """
+        Bunda-Gerth reduction. Find the first reducible token pair from `stream`, 
+        right to left and evaluate the pair according to the grammar rules.
+        """
         Aa, Bb, Cc = stream[1:4]
         D_, L = _unpack(stream[0])
         R, _D = _unpack(stream[4])
 
         if type(Aa) == int and Aa == Cc == -1: # Single node; we're done
-            return Bb,
+            return Bb, # Note: trailling comma, as we're returning a tuple.
         
         if type(Aa) == int and Aa == Bb == -1: 
             # Partial parse; we can't reduce further. This is either a 
             # syntax error, or we've landed on a name that would need 
-            # looking up. 
+            # looking up, or we have a diamond list of expressions.
             return stream
         
         # Separate the tuples into categories and tokens
@@ -200,25 +243,29 @@ class APLParser:
         B, b = _unpack(Bb)
         C, c = _unpack(Cc)
 
-        if type(a) == str and a in self.bkt_pairs[2:] and type(b) == str and b in self.bkt_pairs[2:]: # empty brackets []
+        if f'{a}{b}' in self.bkt_pairs[1:]: # Empty brackets [] {}
             return self.bind((rgt((D_, L)), Aa, self.ebk(b), R, _D)) # rgt(∆_ L)Aa(ebk b)R _∆
         
-        if type(a) == str and type(c) == str and a+c in self.bkt_pairs: # bracketed single value Bb
+        if f'{a}{c}' in self.bkt_pairs: # Bracketed single value Bb
             return self.bind(rgt((D_, L, self.bkt(a, Bb), R, _D)))  # (⊂a c)∊bkts:∇ rgt ∆_ L(a bkt Bb)R _∆
         
-        if a in self.rbs: # right bracket: skip left.
+        if type(a) == str and a in self.rbs: # Right bracket: skip left.
             return self.bind(lft(lft(stream))) # (⊂a)∊rbs:∇ lft lft ⍵
 
         if self.xmat[(A+1, B+1)] >= self.xmat[(B+1, C+1)]: # A:B ≥ B:C → skip left.
             return self.bind(lft(stream)) 
 
+        # BbCc←zmat[B;C],⊂b c ⍝ B bound with C.
         if self.parse_only:
-            BbCc = (self.zmat[(B, C)], (b, c)) # BbCc←zmat[B;C],⊂b c ⍝ B bound with C.
+            BbCc = (self.zmat[(B, C)], (b, c)) 
         else:
             BbCc = self.eval(B, C, b, c) # type: ignore
-        return self.bind(((D_, L), Aa, BbCc, R, _D)) # binds with token to the right?
+        return self.bind(((D_, L), Aa, BbCc, R, _D)) # Binds with token to the right?
     
     def parse(self, src: str):
+        """
+        Parser entrypoint
+        """
         pairs = self.classify(src)
         eos = -1
         ll = [eos]+pairs[:-2]
@@ -230,17 +277,23 @@ class APLParser:
         return self.bind((D_, Aa, Bb, Cc, eos))
     
     def run(self, src: str) -> np.ndarray|Callable:
+        """
+        Interpreter entrypoint
+        """
         tok = self.parse(src)
         if len(tok) == 1:
             if tok[0][0] == 0:
-                if type(tok[0][1]) == np.ndarray:
-                    return tok[0][1]
-                elif type(tok[0][1]) == tuple and callable(tok[0][1][0]):
+                if type(tok[0][1]) == tuple and callable(tok[0][1][0]):
                     return tok[0][1][0](None, tok[0][1][1])
+                else:
+                    return tok[0][1]
                 
         raise NotImplementedError(f"Unrecognized token: {tok}")
 
-    def array_(self, rcat: int, C: int, b: Any, c: Any) -> tuple:
+    def A_(self, rcat: int, C: int, b: Any, c: Any) -> tuple:
+        """
+        Left node is array.
+        """
         if C == self.ctab['A']:             # A:A -> 9 A  ⍝ Strand
             return (rcat, strand(b, c))
         
@@ -270,11 +323,14 @@ class APLParser:
         
         raise NotImplementedError(f"Unknown category: {C}")
     
-    def fun_(self, rcat: int, C: int, b: Any, c: Any) -> tuple:
+    def F_(self, rcat: int, C: int, b: Any, c: Any) -> tuple:
+        """
+        Left node is function.
+        """
         if C == self.ctab['A']:        # F:A -> 6 A  ⍝ Monadic function application
             return (rcat, apply(_fun_ref(b), c))
         
-        if C == self.ctab['F']:        # F:F -> 8 F  ⍝ Derived function, atop
+        if C == self.ctab['F']:        # F:F -> 5 F  ⍝ Derived function, atop
             return (rcat, atop(_fun_ref(b), _fun_ref(c)))
         
         if C == self.ctab['H']:        # F:H -> 8 F  ⍝ Mondadic hybrid operator with bound left function operand
@@ -294,7 +350,10 @@ class APLParser:
         
         raise NotImplementedError(f"Unknown category: {C}")
 
-    def name_(self, rcat: int, C: int, b: Any, c: Any) -> tuple:
+    def N_(self, rcat: int, C: int, b: Any, c: Any) -> tuple:
+        """
+        Left node is name.
+        """
         if C == self.ctab['N']:        # N:N -> 9 N  ⍝ Name stranding
             return (rcat, strand(b, c))
         
@@ -320,6 +379,28 @@ class APLParser:
                     
         raise NotImplementedError(f"Unknown category: {C}")
     
+    def AF_(self, rcat: int, C: int, b: Any, c: Any) -> tuple:
+        """
+        Left node is curried dyadic function.
+        """
+        if C == self.ctab['A']:        # AF:A -> 6 A  ⍝ Monadic function application
+            return (rcat, apply(_fun_ref(b), c))
+        
+        if C == self.ctab['F']:        # AF:F -> 5 F  ⍝ Derived function, atop
+            return (rcat, atop(_fun_ref(b), _fun_ref(c)))
+        
+        if C == self.ctab['AF']:       # AF:AF -> 5 F  ⍝ Atop
+            return (rcat, atop(_fun_ref(b), _fun_ref(c)))
+        
+        if C == self.ctab['MOP']:      # AF:MOP -> 8 F  ⍝ Mondadic operator with bound left function operand
+            return (rcat, derive_function(_fun_ref(b), Voc.get_mop(c)))
+        
+        if C == self.ctab['XL']:       # AF:XL -> 1 XL ⍝ Diamond
+            return (rcat, c) # Value of diamond list is value of last item
+        
+        raise NotImplementedError(f"Unknown category: {C}")
+
+    
     def eval(self, B: int, C: int, b: Any, c: Any) -> tuple:
         """
         Evaluate the expression b c
@@ -328,17 +409,22 @@ class APLParser:
         
         #---------- LEFT IS ARRAY -----------------
         if B == self.ctab['A']:
-            return self.array_(rcat, C, b, c)
+            return self.A_(rcat, C, b, c)
 
         #---------- LEFT IS FUNCTION --------------
         elif B == self.ctab['F']:
-            return self.fun_(rcat, C, b, c)
+            return self.F_(rcat, C, b, c)
         
-        #---------- LEFT IS NAME - ----------------
+        #---------- LEFT IS NAME ------------------
         elif B == self.ctab['N']:
-            return self.name_(rcat, C, b, c)
+            return self.N_(rcat, C, b, c)
+        
+        #---------- LEFT IS CURRIED DYAD ----------
+        elif B == self.ctab['AF']:
+            return self.AF_(rcat, C, b, c)
                 
-        return (rcat, (b, c))
+        # return (rcat, (b, c))
+        raise NotImplementedError(f"Unknown category: {B}")
 
 def _simple_scalar(e: Any) -> bool:
     return isinstance(e, (int, float, complex, str))
@@ -376,6 +462,10 @@ def strand(left: tuple|APLTYPE, right: tuple|APLTYPE) -> np.ndarray:
     return nested
 
 def curry(left: np.ndarray, right: Callable) -> Callable:
+    """
+    Bind the left argument `left` to the dyadic function `right`, to give
+    a monadic function.
+    """
     return lambda _, omega: right(left, omega)
 
 def derive_function(left: np.ndarray|Callable, right: Callable) -> Callable:
@@ -414,11 +504,8 @@ def apply(left: Callable, right: np.ndarray) -> np.ndarray:
 
 def atop(left: Callable, right: Callable) -> Callable:
     """
-    -⍤÷ 4      ⍝ (  f⍤g y) ≡  f   g y
-    ¯0.25
-
-    12 -⍤÷ 4   ⍝ (x f⍤g y) ≡ (f x g y)
-    ¯3
+    (f⍤g y) ≡ f g y
+    x f⍤g y) ≡ (f x g y)
     """
     def derived(alpha: Optional[np.ndarray], omega: np.ndarray) -> np.ndarray:
         return left(None, right(alpha, omega))
@@ -426,7 +513,7 @@ def atop(left: Callable, right: Callable) -> Callable:
 
 def rgt(stream: tuple) -> tuple:
     """
-    Skip right
+    Shift `stream` one step right
 
     rgt ← {
         ∆_ A B C (R _∆) ← ⍵
@@ -440,7 +527,7 @@ def rgt(stream: tuple) -> tuple:
 
 def lft(stream: tuple) -> tuple:
     """
-    Skip left
+    Shift `stream` one step left
 
     lft ← {
         (∆_ L) A B C _∆ ← ⍵
@@ -477,7 +564,7 @@ def getstring(src: str, idx: int) -> tuple[int, np.ndarray]:
     if not m:
         raise SyntaxError("SYNTAX ERROR: Unpaired quote")
     data = m.group(1)
-    return (2+idx+len(data), np.array(list(data.replace("''", "'"))))
+    return (2+idx+len(data), np.array(list(data.replace("''", "'")), dtype='<U1'))
 
 def get_cmplx(tok: str) -> complex:
     parts = tok.split('J')
@@ -528,6 +615,11 @@ if __name__ == "__main__":
     src = 'a (+⍤1 0) b'
     src = 'a[1] b[2] c[3]'
     src = '(a[1] b)[1]'
-    p = APLParser(parse_only=True)
-    ast = p.parse(src)
-    print(ast)
+    src = "'abcd'~'bde'"
+    src = "''"
+    src = '(2 2⍴1),1'
+    p = APL()
+    print(p.run(src))
+    # p = APL(parse_only=True)
+    # ast = p.parse(src)
+    # print(ast)

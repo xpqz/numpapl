@@ -1,4 +1,4 @@
-from itertools import product
+import itertools
 import math
 from string import ascii_letters
 from typing import Callable, Optional
@@ -6,12 +6,11 @@ from typing import Callable, Optional
 import numpy as np
 
 import arr
-
 from environment import Env
 from errors import ArityError, DomainError, LengthError, NYIError, RankError
 
 def nyi(*args):
-    raise NYIError('NYI ERROR')
+    raise NotImplementedError('NYI')
 
 def _is_int(a: np.ndarray) -> bool:
     return np.issubdtype(a.dtype, np.integer)
@@ -21,7 +20,7 @@ def _is_bool(a: np.ndarray) -> bool:
 
 def iota(alpha: Optional[np.ndarray|str], omega: np.ndarray) -> np.ndarray:
     if alpha:
-        raise NYIError('NYI ERROR: dyadic iota')
+        raise NYIError('NYI ERROR: index-of (dyadic iota, a⍳b)')
 
     # Mondadic iota: index generator
     if not _is_int(omega):
@@ -35,12 +34,38 @@ def iota(alpha: Optional[np.ndarray|str], omega: np.ndarray) -> np.ndarray:
     
     odo = [
         np.array(c)
-        for c in product(*((range(c)) for c in omega))
+        for c in itertools.product(*((range(c)) for c in omega))
     ]
     a = np.empty(len(odo), dtype=object)
     a[:] = odo
     return a.reshape(omega)
 
+def tally(alpha: Optional[np.ndarray], omega: np.ndarray) -> np.ndarray:
+    """
+    Monadic: tally
+    Dyadic: not-match
+    """
+    if alpha is None:
+        if omega.ndim == 0:
+            return np.array(1)
+        return np.array(omega.shape[0])
+    
+    return match(alpha, omega)^1
+
+def match(alpha: Optional[np.ndarray], omega: np.ndarray) -> np.ndarray:
+    """
+    TODO: check how this works on enclosed items.
+    """
+    if alpha is None:
+        raise NotImplementedError('NYI: depth')
+    
+    if isinstance(alpha, np.ndarray) and isinstance(omega, np.ndarray):
+        if alpha.shape != omega.shape:
+            return np.array(0)
+        return np.array(int(np.all([match(ai, bi) for ai, bi in zip(alpha.flat, omega.flat)])))
+    else:
+       return np.array(int(alpha == omega))
+    
 def rho(alpha: Optional[np.ndarray|str], omega: np.ndarray) -> np.ndarray:
     """
     Monadic ⍴: shape
@@ -48,28 +73,72 @@ def rho(alpha: Optional[np.ndarray|str], omega: np.ndarray) -> np.ndarray:
     """
     if alpha is None:
         return np.array(list(omega.shape))
-    a = Env.resolve(alpha)
-    assert isinstance(a, np.ndarray)
+    
+    assert isinstance(alpha, np.ndarray)
+    bound = math.prod(alpha)
 
     if omega.ndim == 0:
-        return omega.repeat(math.prod(a)).reshape(a)
+        return np.repeat(omega, bound).reshape(alpha)
     
-    return omega.reshape(a)
+    # If we already have the right number of elements, we can 
+    # just reshape the array == fast.
+    if math.prod(omega.shape) == bound:
+        return omega.reshape(alpha)
 
-def comma(alpha: Optional[np.ndarray], omega: np.ndarray, axis: int = 0) -> np.ndarray:
+    # If we don't have the right number of elements, we need to
+    # do some fancy itertools dance to repeat elements and/or
+    # cut off a few.
+    return np.array(list(itertools.islice(itertools.cycle(omega.ravel()), bound))).reshape(alpha)
+    
+def comma(alpha: Optional[np.ndarray], omega: np.ndarray, axis: int = -1) -> np.ndarray:
+    """
+    Mondadic: ravel
+    Dyadic: catenate last (trailling axis)
+    """
     if alpha is None:
         return np.ravel(omega)
+    
+    if alpha.ndim != omega.ndim:
+        if omega.ndim == 0: # Scalar extension
+            shape = list(alpha.shape)
+            shape[-1] = 1
+            return np.concatenate((alpha, omega.repeat(math.prod(shape)).reshape(shape)), axis=axis)
+        raise LengthError('LENGTH ERROR')
+
     return np.concatenate((alpha, omega), axis=axis)
 
+def right_shoe(alpha: Optional[np.ndarray], omega: np.ndarray, axis: int = 0) -> np.ndarray:
+    """
+    Monadic: first/disclose
+    Dyadic: pick
+
+    Note: APL's enclose and disclose fit poorly with numpy's array model
+    """
+    if alpha is None:
+        if omega.ndim == 0:               # Disclose
+            return arr.disclose(omega)
+        return arr.disclose(omega[0])     # First
+
+    if omega.ndim == 0:
+        raise LengthError('LENGTH ERROR')
+
+    if alpha > omega.shape[0]:
+        raise LengthError('LENGTH ERROR')
+    
+    return arr.disclose(omega[alpha])     # Pick
+    
 def left_shoe(alpha: Optional[np.ndarray], omega: np.ndarray, axis: int = 0) -> np.ndarray:
     if axis != 0:
-        raise NYIError("axis != 0")
+        raise NYIError("NYI enclose with axis != 0")
     if alpha is None:
         return arr.enclose(omega)
     raise NYIError
 
 def rtack(alpha: Optional[np.ndarray], omega: np.ndarray) -> np.ndarray:
     return omega
+
+def ltack(alpha: np.ndarray, omega: np.ndarray) -> np.ndarray:
+    return alpha
 
 def plus(alpha: Optional[np.ndarray], omega: np.ndarray) -> np.ndarray:
     if alpha is None:
@@ -83,8 +152,15 @@ def minus(alpha: Optional[np.ndarray], omega: np.ndarray) -> np.ndarray:
 
 def times(alpha: Optional[np.ndarray], omega: np.ndarray) -> np.ndarray:
     if alpha is None:
+        if omega == 0:
+            return np.array(0)
         return omega / abs(omega)
     return alpha * omega
+
+def divide(alpha: Optional[np.ndarray], omega: np.ndarray) -> np.ndarray:
+    if alpha is None:
+        return 1 / omega
+    return alpha / omega
     
 def replicate(alpha: Optional[np.ndarray], omega: np.ndarray) -> np.ndarray:
     """
@@ -375,14 +451,19 @@ class Voc:
     }
 
     funs: dict[str, Callable] = {
+        '≢': lambda a, w: tally(Env.resolve(a), Env.resolve(w)),
+        '≡': lambda a, w: match(Env.resolve(a), Env.resolve(w)),
         '⍳': lambda a, w: iota(Env.resolve(a), Env.resolve(w)),
         '⊂': lambda a, w: left_shoe(Env.resolve(a), Env.resolve(w)),
+        '⊃': lambda a, w: right_shoe(Env.resolve(a), Env.resolve(w)),
         ',': lambda a, w: comma(Env.resolve(a), Env.resolve(w)),
         '⍴': lambda a, w: rho(Env.resolve(a), Env.resolve(w)),
         '⊢': lambda a, w: rtack(Env.resolve(a), Env.resolve(w)),
+        '⊣': lambda a, w: ltack(Env.resolve(a), Env.resolve(w)),
         '+': lambda a, w: plus(Env.resolve(a), Env.resolve(w)),
         '-': lambda a, w: minus(Env.resolve(a), Env.resolve(w)),
         '×': lambda a, w: times(Env.resolve(a), Env.resolve(w)),
+        '÷': lambda a, w: divide(Env.resolve(a), Env.resolve(w)),
         '⍉': lambda a, w: transpose(Env.resolve(a), Env.resolve(w)),
         '⍋': lambda a, w: grade_up(Env.resolve(a), Env.resolve(w)),
         '⍒': lambda a, w: grade_down(Env.resolve(a), Env.resolve(w)),

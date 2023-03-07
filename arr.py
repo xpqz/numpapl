@@ -1,4 +1,6 @@
-
+"""
+Helper functions for array operations.
+"""
 import math
 from typing import Any, Callable, Generator
 
@@ -7,31 +9,42 @@ import numpy as np
 from errors import RankError
 
 def enclose(arr):
+    """
+    This is doing hideous, suboptimal things to numpy arrays.
+
+    APL's array model is boxed. NumPy's is not. So how to we make
+    an enclosed object in NumPy? We can't, for example, do
+
+        ⊂1 2 3 4       ⍝ Scalar
+        ┌───────────┐
+        │ ┌→──────┐ │
+        │ │1 2 3 4│ │
+        │ └~──────┘ │
+        └∊──────────┘
+
+        a = np.array(np.array([1, 2, 3, 4]), dtype=object).reshape(()) # Error
+    """
     if arr.shape == ():
         return arr
-    return np.array([arr])
-
-def _numeric(x: Any) -> bool:
-    return isinstance(x, (int, float, complex))
-
-def _string(x: Any) -> bool:
-    return type(x) == str
     
-def rank(arr: np.ndarray) -> int:
-    return arr.ndim
+    c = np.empty(1, dtype=object)
+    c[:] = [arr]
+    return c.reshape(())
 
+def disclose(arr):
+    if type(arr) == np.ndarray:
+        if arr.ndim == 0:               # Disclose
+            if arr.dtype != object:     # Simple scalar
+                return arr 
+            return arr.reshape((1,))[0] # Enclosed object
+    return arr
+        
 def major_cells(arr: np.ndarray) -> Generator[np.ndarray, None, None]:
     """
     Yields the major cells of an array.
     """
     for i in range(arr.shape[0]):
         yield arr[i]
-    
-def catenate(a1: np.ndarray, a2: np.ndarray, axis=0) -> np.ndarray:
-    """
-    Concatenate two arrays along given existing axis, defaulting to first.
-    """
-    return np.concatenate((a1, a2), axis=axis)
 
 def kcells(arr: np.ndarray, k: int) -> list[np.ndarray]:
     """
@@ -44,18 +57,18 @@ def kcells(arr: np.ndarray, k: int) -> list[np.ndarray]:
     When we implement ⍤, we'll need to use this, rather than just returning
     the cells as a list.
     """
-    if k > rank(arr) or k < 0:
+    if k > arr.ndim or k < 0:
         raise RankError('RANK ERROR: kcells must be less than or equal to rank and greater than or equal to zero')
 
-    if k == rank(arr):
+    if k == arr.ndim:
         return enclose(arr.copy())
 
     # Shape and bound of result
-    rsh = arr.shape[:rank(arr)-k]
+    rsh = arr.shape[:arr.ndim-k]
     rbnd = math.prod(rsh)
 
     # Shape and bound of each cell
-    csh = arr.shape[rank(arr)-k:]
+    csh = arr.shape[arr.ndim-k:]
     cbnd = math.prod(csh)
     data = np.ravel(arr) 
     return [

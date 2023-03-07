@@ -74,9 +74,11 @@ class Env:
         raise ValueError(f'VALUE ERROR: Undefined name: {key}')
 
     @classmethod
-    def resolve(cls, a):
+    def resolve(cls, a:Any) -> np.ndarray:
         if type(a) == str:
             return cls.get(a)
+        if isinstance(a, (int, float, complex, str)):
+            return np.array(a)
         return a
 
 
