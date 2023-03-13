@@ -18,6 +18,118 @@ def _is_int(a: np.ndarray) -> bool:
 def _is_bool(a: np.ndarray) -> bool:
     return np.array_equal(a, a.astype(bool))
 
+def _mkv(a: np.ndarray) -> np.ndarray:
+    if a.ndim == 0:
+        return a.reshape((1,))
+    return a
+
+def _reshape_singleton(a: np.ndarray, shape: tuple[int, ...]) -> np.ndarray:
+    if a.size != 1:
+        return a
+    
+    filler = _prot(a)
+    arr = np.empty(math.prod(shape), dtype=a.dtype)
+    arr.fill(filler)    
+    arr[0] = a[0]
+    return arr.reshape(shape)
+
+def _prot_scalar(a: np.ndarray) -> np.ndarray:
+    if a.ndim == 0:
+        if np.issubdtype(a.dtype, np.number):
+            return np.array(0)
+        elif np.issubdtype(a.dtype, np.str_):
+            return np.array(' ')
+        return _prot(right_shoe(None, a))
+    raise SyntaxError('_prot_scalar applied to non-scalar')
+    
+def _prot(a: np.ndarray) -> np.ndarray:
+    """
+    Prototypal element.
+    """
+    if a.ndim == 0:
+        return _prot_scalar(a)
+    
+    first = np.array(a.ravel()[0], copy=True)
+    if first.ndim == 0:
+        return _prot_scalar(first)
+
+    def inner(o: np.ndarray) -> None:
+        """
+        Recursively set all numbers to zero and all strings to space, whilst
+        keeping shape and depth nesting.
+        """
+        with np.nditer(o, flags=['refs_ok'], op_flags=['readwrite']) as it: # type: ignore
+            for x in it:
+                if x.ndim == 0:                  # type: ignore
+                    x[...] = _prot_scalar(x)     # type: ignore
+                else:
+                    inner(right_shoe(None, x))   # type: ignore
+
+    inner(first)
+    return first
+
+def uparrow(alpha: Optional[np.ndarray], omega: np.ndarray) -> np.ndarray:
+    """
+    Monadic ↑ -- mix: https://aplwiki.com/wiki/Mix
+    Dyadic  ↑ -- take: https://aplwiki.com/wiki/Take
+
+    Corners:
+
+        [ ] monadic ↑
+        [ ] negative take
+        [x] overtake
+        [x] scalar left
+        [x] scalar right
+
+    """
+
+    if alpha is None:
+        raise NotImplementedError('NYI: mix')
+    
+    # Up-rank scalars to singletons
+    a = _mkv(alpha)
+    b = _mkv(omega)
+    mag_a = abs(a)
+    
+    # If right is a scalar, we need to extend it to the same shape
+    # as the left, filling with the prototype element of the right.
+    filler = _prot(b)
+    right = np.empty(math.prod(mag_a), dtype=omega.dtype)
+    right.fill(filler)
+    
+    # if b.size == 1:
+    #     # If b is a scalar, then we'll end up with an array
+    #     # that has the value b in one of its 'corners' depending
+    #     # on the signs of the components of a.
+
+    #     if (a>=0).all():
+    #         right[0] = b
+    #     else:
+    #         right[-1] = b
+    #     return right.reshape(mag_a)
+
+    right = right.reshape(mag_a)
+
+    # Generate the relevant slices for indexing,
+    # respecting any negative indices.
+    idx = []
+    for axis in a:
+        if axis < 0:
+            idx.append(slice(axis, None, 1))
+        else:
+            idx.append(slice(0, axis, 1))
+
+    if len(idx) == 1:
+        idx_t = idx[0]
+    else:
+        idx_t = tuple(idx) # type: ignore
+
+    right[idx_t] = _reshape_singleton(b, tuple(mag_a))[idx_t]
+
+    # idx = tuple(np.indices(tuple(a.tolist())))
+    # right[idx] = b[idx]
+    return right
+    
 def iota(alpha: Optional[np.ndarray|str], omega: np.ndarray) -> np.ndarray:
     if alpha:
         raise NYIError('NYI ERROR: index-of (dyadic iota, a⍳b)')
@@ -451,6 +563,7 @@ class Voc:
     }
 
     funs: dict[str, Callable] = {
+        '↑': lambda a, w: uparrow(Env.resolve(a), Env.resolve(w)),
         '≢': lambda a, w: tally(Env.resolve(a), Env.resolve(w)),
         '≡': lambda a, w: match(Env.resolve(a), Env.resolve(w)),
         '⍳': lambda a, w: iota(Env.resolve(a), Env.resolve(w)),
