@@ -24,13 +24,22 @@ def _mkv(a: np.ndarray) -> np.ndarray:
     return a
 
 def _reshape_singleton(a: np.ndarray, shape: tuple[int, ...]) -> np.ndarray:
+    """
+    If a is a singleton (length 1 vector), expand it to `shape`, 
+    repeating the data.
+
+    For example, 
+
+    >>> _reshape_singleton(np.array([1]), (2,2))
+    array([[1, 1],
+           [1, 1]])
+
+    Non-singleton arrays are left unchanged.
+    """
     if a.size != 1:
         return a
-    
-    filler = _prot(a)
     arr = np.empty(math.prod(shape), dtype=a.dtype)
-    arr.fill(filler)    
-    arr[0] = a[0]
+    arr.fill(a)    
     return arr.reshape(shape)
 
 def _prot_scalar(a: np.ndarray) -> np.ndarray:
@@ -76,10 +85,10 @@ def uparrow(alpha: Optional[np.ndarray], omega: np.ndarray) -> np.ndarray:
     Corners:
 
         [ ] monadic ↑
-        [ ] negative take
+        [x] negative take
         [x] overtake
-        [x] scalar left
-        [x] scalar right
+        [x] scalar extension left
+        [x] scalar extension right
 
     """
 
@@ -96,18 +105,6 @@ def uparrow(alpha: Optional[np.ndarray], omega: np.ndarray) -> np.ndarray:
     filler = _prot(b)
     right = np.empty(math.prod(mag_a), dtype=omega.dtype)
     right.fill(filler)
-    
-    # if b.size == 1:
-    #     # If b is a scalar, then we'll end up with an array
-    #     # that has the value b in one of its 'corners' depending
-    #     # on the signs of the components of a.
-
-    #     if (a>=0).all():
-    #         right[0] = b
-    #     else:
-    #         right[-1] = b
-    #     return right.reshape(mag_a)
-
     right = right.reshape(mag_a)
 
     # Generate the relevant slices for indexing,
@@ -115,9 +112,15 @@ def uparrow(alpha: Optional[np.ndarray], omega: np.ndarray) -> np.ndarray:
     idx = []
     for axis in a:
         if axis < 0:
-            idx.append(slice(axis, None, 1))
+            if b.size == 1:
+                idx.append(slice(-1, None, 1))
+            else:
+                idx.append(slice(axis, None, 1))  
         else:
-            idx.append(slice(0, axis, 1))
+            if b.size == 1:
+                idx.append(slice(0, 1, 1))
+            else:
+                idx.append(slice(0, axis, 1))
 
     if len(idx) == 1:
         idx_t = idx[0]
@@ -125,9 +128,6 @@ def uparrow(alpha: Optional[np.ndarray], omega: np.ndarray) -> np.ndarray:
         idx_t = tuple(idx) # type: ignore
 
     right[idx_t] = _reshape_singleton(b, tuple(mag_a))[idx_t]
-
-    # idx = tuple(np.indices(tuple(a.tolist())))
-    # right[idx] = b[idx]
     return right
     
 def iota(alpha: Optional[np.ndarray|str], omega: np.ndarray) -> np.ndarray:
