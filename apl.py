@@ -206,10 +206,10 @@ class APL:
         except ValueError:
             zcat = ([cat]+self.bcats[1:])[len(self.lbs)]
 
-        if self.parse_only:
-            return (zcat, (bracket, expr))
-        else:
-            return zcat, expr
+        # if self.parse_only:
+        return (zcat, (bracket, expr))
+        # else:
+        #     return zcat, expr
     
     def ebk(self, bracket: str) -> tuple:
         """
@@ -432,12 +432,17 @@ def _simple_scalar(e: Any) -> bool:
 def _payload(e: Any) -> APLTYPE:
     if type(e) == tuple:
         return e[1]
-    return e
+    return _ensure_array(e)
 
 def _fun_ref(f: Any) -> Callable:
     if callable(f):
         return f
     return Voc.get_fn(f)
+
+def _ensure_array(a: Any) -> np.ndarray:
+    if type(a) == np.ndarray:
+        return a
+    return np.array(a)
             
 def strand(left: tuple|APLTYPE, right: tuple|APLTYPE) -> np.ndarray:
     # Flat strand of two simple scalars: 1 2
@@ -451,15 +456,37 @@ def strand(left: tuple|APLTYPE, right: tuple|APLTYPE) -> np.ndarray:
     if _simple_scalar(left) and type(right) == np.ndarray:
         return np.hstack((left, right))
     
-    # Flat, bracketed, strand of two simple scalars: (1)(2)
-    if (type(left) == tuple and type(right) == tuple and 
-        _simple_scalar(left[1]) and _simple_scalar(right[1])):
-        return np.hstack((left[1], right[1]))
-    
-    # Nested: (1 2 3)(4 5 6)
-    nested = np.empty(2, dtype=object)
-    nested[:] = [_payload(left), _payload(right)] # type: ignore
-    return nested
+    if type(left) == tuple and type(right) == tuple:
+        # Flat, bracketed, strand of two simple scalars: (1)(2)
+        if _simple_scalar(left[1]) and _simple_scalar(right[1]):
+            return np.hstack((left[1], right[1]))
+        else: # Bracketed arrays, e,g (1 2 3)(4 5 6) or (1 2 3)4
+            nested = np.empty(2, dtype=object)
+            nested[:] = [_payload(left[1]), _payload(right[1])] # type: ignore
+            return nested
+        
+    if type(left) == tuple:
+        if type(right) == tuple:
+            # Flat, bracketed, strand of two simple scalars: (1)(2)
+            if _simple_scalar(left[1]) and _simple_scalar(right[1]):
+                return np.hstack((left[1], right[1]))    
+            # Bracketed arrays, e,g (1 2 3)(4 5 6)
+            nested = np.empty(2, dtype=object)
+            nested[:] = [_payload(left[1]), _payload(right[1])] # type: ignore
+            return nested
+        else:
+            nested = np.empty(2, dtype=object)
+            nested[:] = [_payload(left[1]), _payload(right)] # type: ignore
+            return nested
+    else:
+        if type(right) == tuple:
+            nested = np.empty(2, dtype=object)
+            nested[:] = [_payload(left), _payload(right[1])] # type: ignore
+            return nested
+        else:
+            nested = np.empty(2, dtype=object)
+            nested[:] = [_payload(left), _payload(right)] # type: ignore
+            return nested
 
 def curry(left: np.ndarray, right: Callable) -> Callable:
     """
@@ -590,7 +617,6 @@ def getnum(src: str, idx: int) -> tuple[int, int|float|complex]:
         val = float(tok)
     else:
         val = int(tok)
-    # return (idx+len(tok), np.array(val))
     return (idx+len(tok), val)
 
 def getname(src: str, idx: int) -> tuple[int, str]:
@@ -601,25 +627,3 @@ def getname(src: str, idx: int) -> tuple[int, str]:
     if data[0] == '⎕':
         return (idx+len(data), data.upper())
     return (idx+len(data), data)
-
-if __name__ == "__main__":
-    src = '{⍺+⍵}/⍳5'
-    src = '(1 2 3 4)(5)'
-    src = '1 2 3 4[1]'
-    src = '1 2 3 4[1 0]'
-    src = '+/1 2 3 4' # not yet
-    src = '0 1 0 1/1 2 3 4'
-    src = '-+'
-    src = '5+7'
-    src = '1 +⍨ 2'
-    src = 'a (+⍤1 0) b'
-    src = 'a[1] b[2] c[3]'
-    src = '(a[1] b)[1]'
-    src = "'abcd'~'bde'"
-    src = "''"
-    src = '(2 2⍴1),1'
-    p = APL()
-    print(p.run(src))
-    # p = APL(parse_only=True)
-    # ast = p.parse(src)
-    # print(ast)

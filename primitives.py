@@ -23,6 +23,21 @@ def _mkv(a: np.ndarray) -> np.ndarray:
         return a.reshape((1,))
     return a
 
+def _shape2slice(a):
+    return tuple([slice(0, dim) for dim in a])
+
+def _fill_to_shape(a: np.ndarray, shape: tuple[int, ...]) -> np.ndarray:
+    """
+    Reshape a to shape, but fill with prototype element if shapes are
+    incompatible.
+    """
+    prot = _prot(a)
+    arr = np.empty(math.prod(shape), dtype=a.dtype)
+    arr.fill(prot)
+    arr = arr.reshape(shape)
+    arr[_shape2slice(a.shape)] = a
+    return arr
+
 def _reshape_singleton(a: np.ndarray, shape: tuple[int, ...]) -> np.ndarray:
     """
     If a is a singleton (length 1 vector), expand it to `shape`, 
@@ -77,6 +92,36 @@ def _prot(a: np.ndarray) -> np.ndarray:
     inner(first)
     return first
 
+def mix(omega: np.ndarray) -> np.ndarray:
+    """
+    Monadic ↑ - trade depth for rank
+
+    See https://aplwiki.com/wiki/Mix
+    """
+    if not len(omega.shape) or not math.prod(omega.shape) or (omega.ndim == 1 and not omega.dtype == object):
+        return omega
+    
+    shape = omega.shape
+    shapes = [e.shape for e in omega]
+    r = max(e.ndim for e in omega)
+
+    sshapes = []
+    # If ranks differ, pad shapes with 1s to the left
+    for s in shapes: # (⍴↓(r⍴1)∘,)¨shapes ⍝ Prepend 1 to each shape to equal max length
+        rr1 = [1]*r
+        if len(s):
+            rr1[-len(s):] = s
+        sshapes.append(rr1)
+
+    smax = np.array([max(v) for v in zip(*sshapes)]) # max per axis
+    ravel = [] # type: ignore
+    for i, elem in enumerate(omega):
+        reshaped = _fill_to_shape(elem, tuple(sshapes[i])) # In case we added
+        taken = uparrow(smax, reshaped)
+        ravel.extend(taken.data)
+
+    return np.array(ravel).reshape((*shape, *tuple(smax)))
+
 def uparrow(alpha: Optional[np.ndarray], omega: np.ndarray) -> np.ndarray:
     """
     Monadic ↑ -- mix: https://aplwiki.com/wiki/Mix
@@ -84,16 +129,15 @@ def uparrow(alpha: Optional[np.ndarray], omega: np.ndarray) -> np.ndarray:
 
     Corners:
 
-        [ ] monadic ↑
-        [x] negative take
-        [x] overtake
-        [x] scalar extension left
-        [x] scalar extension right
-
+            [x] monadic ↑
+            [x] negative take
+            [x] overtake
+            [x] scalar extension left
+            [x] scalar extension right
     """
 
     if alpha is None:
-        raise NotImplementedError('NYI: mix')
+        return mix(omega)
     
     # Up-rank scalars to singletons
     a = _mkv(alpha)
@@ -110,17 +154,17 @@ def uparrow(alpha: Optional[np.ndarray], omega: np.ndarray) -> np.ndarray:
     # Generate the relevant slices for indexing,
     # respecting any negative indices.
     idx = []
-    for axis in a:
+    for i, axis in enumerate(a):
         if axis < 0:
             if b.size == 1:
                 idx.append(slice(-1, None, 1))
             else:
-                idx.append(slice(axis, None, 1))  
+                idx.append(slice(-min(abs(axis), b.shape[i]), None, 1)) 
         else:
             if b.size == 1:
                 idx.append(slice(0, 1, 1))
             else:
-                idx.append(slice(0, axis, 1))
+                idx.append(slice(0, min(axis, b.shape[i]), 1))
 
     if len(idx) == 1:
         idx_t = idx[0]
@@ -373,10 +417,13 @@ def transpose(alpha: Optional[np.ndarray], omega: np.ndarray) -> np.ndarray:
     # We can hardwire the simple case of all axes == 0 to give
     # us a diagonal.
 
-    if alpha.ndim > 0 and np.all(alpha == alpha[0]):
+    if alpha.ndim == 1 and np.all(alpha == alpha[0]):
         if alpha[0] != 0:
             raise NYIError('NYI ERROR: transpose with repeated axes ≠ 0')
-        return np.diagonal(omega).copy()
+        return np.diagonal(omega)
+    
+    if alpha.ndim > 1:
+        raise LengthError('LENGTH ERROR')
     
     # Note: numpy's axis spec for dyadic transpose is NOT the same 
     # as APL's: we need the grade permutation of the axes.
@@ -385,12 +432,32 @@ def transpose(alpha: Optional[np.ndarray], omega: np.ndarray) -> np.ndarray:
 def grade_up(alpha: Optional[np.ndarray], omega: np.ndarray) -> np.ndarray:
     if alpha:
         raise NYIError('NYI ERROR: dyadic ⍋')
-    return np.argsort(omega)
+    
+    if omega.ndim == 0:
+        raise RankError('RANK ERROR')
+    
+    if omega.ndim == 1:
+        return np.argsort(omega)
+    
+    if omega.ndim == 2:
+        return np.lexsort(omega.T[::-1])
+    
+    raise NYIError('NYI ERROR: ⍋ for rank > 2')
 
 def grade_down(alpha: Optional[np.ndarray], omega: np.ndarray) -> np.ndarray:
     if alpha:
         raise NYIError('NYI ERROR: dyadic ⍒')
-    return np.argsort(omega)[::-1]
+    
+    if omega.ndim == 0:
+        raise RankError('RANK ERROR')
+    
+    if omega.ndim == 1:
+        return np.argsort(omega)[::-1]
+    
+    if omega.ndim == 2:
+        return np.lexsort(omega.T[::-1])[::-1]
+    
+    raise NYIError('NYI ERROR: ⍒ for rank > 2')
 
 def encode(alpha: Optional[np.ndarray], omega: np.ndarray) -> np.ndarray:
     if alpha is None:

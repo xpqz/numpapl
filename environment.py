@@ -79,6 +79,8 @@ class Env:
             return cls.get(a)
         if isinstance(a, (int, float, complex, str)):
             return np.array(a)
+        if isinstance(a, tuple):
+            return a[1] # Resolved bracketed expressions
         return a
 
 

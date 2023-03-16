@@ -13,7 +13,7 @@ def nested_array_equal(a, b):
     else:
         return a == b
 
-def nest(shape: tuple[int, int], arr: list[list]) -> np.ndarray:
+def nest(shape: tuple, arr: list[list|int]) -> np.ndarray:
     bound = math.prod(shape)
     a = np.empty(bound, dtype=object)
     a[:] = [np.array(e) for e in arr]
@@ -59,6 +59,8 @@ array_structural = [
     ("⍉2 2⍴1 2 3 4", np.array([1, 3, 2, 4]).reshape((2, 2))),
     ("⍳5", np.arange(5)),
     ("⍳2 2", nest((2, 2), [[0, 0], [0, 1], [1, 0], [1, 1]])),
+    ("(1 2 3)(4 5 6)", nest((2,), [[1, 2, 3], [4, 5, 6]])),
+    ("(1 2 3)4", nest((2,), [[1, 2, 3], 4])),  
 ]
 
 @pytest.mark.parametrize("test_input,expected", array_structural)
@@ -93,6 +95,7 @@ primitives = [
     ("2 2 2 2 ⊤ 5 7 12", np.array([0,0,1,1,1,1,0,1,0,1,1,0]).reshape((4,3))),
     ("⍋ 33 11 44 66 22", np.array([1,4,0,2,3])),
     ("⍒ 33 11 44 66 22", np.array([3,2,0,4,1])),
+    ("⍋3 3⍴7 3 4 7 9 7 3 4 5", np.array([2,0,1])),
     ("1 0 2/1 2 3", np.array([1,3,3])),
     ("1 0 2⌿1 2 3", np.array([1,3,3])),
     ("5/1", np.array([1,1,1,1,1])),
@@ -111,6 +114,8 @@ primitives = [
     ("2≡1", 0),
     ("'mississippi'~'s'", np.array(list('miiippi'))),
     ("1 0 2⍉3 3 3⍴1 1 1 1 1 1 1 1 1 2 2 2 2 2 2 2 2 2 3 3 3 3 3 3 3 3 3", np.array([1,1,1,2,2,2,3,3,3,1,1,1,2,2,2,3,3,3,1,1,1,2,2,2,3,3,3]).reshape((3,3,3))),
+
+    # Take
     ("3↑1 2 3 4 5", np.array([1, 2, 3])),
     ("3 3↑9 9⍴⍳81", np.array([0,1,2,9,10,11,18,19,20]).reshape((3,3))),
     ("3↑1", np.array([1,0,0])),
@@ -118,8 +123,21 @@ primitives = [
     ("3 ¯3↑9 9⍴⍳81", np.array([6,7,8,15,16,17,24,25,26]).reshape((3,3))),
     ("¯3↑1", np.array([0,0,1])),
     ("3 ¯3↑1", np.array([0,0,1,0,0,0,0,0,0]).reshape((3,3))),
+
+    # Mix
+    ("↑(1 2 3)(4 5 6)", np.array([1,2,3,4,5,6]).reshape((2,3))),
+    ("↑(1 2 3)(4 5)", np.array([1,2,3,4,5,0]).reshape((2,3))),
+    ("↑(1 2 3)4", np.array([1,2,3,4,0,0]).reshape((2,3))),
 ]
 
 @pytest.mark.parametrize("test_input,expected", primitives)
 def test_primitives(test_input, expected):
     assert nested_array_equal(run(test_input), expected)
+
+# gets = [
+#     ("a←5⋄a", 5),
+# ]
+
+# @pytest.mark.parametrize("test_input,expected", gets)
+# def test_gets(test_input, expected):
+#     assert nested_array_equal(run(test_input), expected)
