@@ -48,3 +48,25 @@ test_data = [
 @pytest.mark.parametrize("test_input,expected", test_data)
 def test_eval(test_input, expected):
     assert parse_only(test_input) == expected
+
+diamond_data = [
+    ("1⋄2", "((0, ((1, '⋄'), 2)),)"),
+    ("x←1⋄2+3", "((0, (((('x', '←'), 1), '⋄'), ((2, '+'), 3))),)"),
+
+    # NOTE: this is a parse failure, but it's failing like the the 
+    # dfns version does :/
+    # ┌──┬──┬──┬───────────────┬────────────────────┐
+    # │¯1│¯1│¯1│┌──┬──────────┐│┌───┬──────────────┐│
+    # │  │  │  ││15│┌──────┬─┐│││2 x│┌──────┬─────┐││
+    # │  │  │  ││  ││┌──┬─┐│⋄││││   ││┌─┬──┐│¯1 ¯1│││
+    # │  │  │  ││  │││x←│1││ ││││   │││0│+3││     │││
+    # │  │  │  ││  ││└──┴─┘│ ││││   ││└─┴──┘│     │││
+    # │  │  │  ││  │└──────┴─┘│││   │└──────┴─────┘││
+    # │  │  │  │└──┴──────────┘│└───┴──────────────┘│
+    # └──┴──┴──┴───────────────┴────────────────────┘
+    ("x←1⋄x+3", "(-1, -1, -1, (15, ((('x', '←'), 1), '⋄')), ((2, 'x'), ((0, ('+', 3)), (-1, -1))))"), 
+]
+
+@pytest.mark.parametrize("test_input,expected", diamond_data)
+def test_diamond(test_input, expected):
+    assert parse_only(test_input) == expected

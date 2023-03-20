@@ -160,6 +160,7 @@ class APL:
                 continue
             elif ch in ascii_letters+"⎕_": # A variable name
                 i, name = getname(src, i)
+                # reftype = self.classify_name(name)   # BQN-style naming conventions
                 pairs.append((self.ctab['N'], name))
                 continue
             elif ch in self.functions:
@@ -175,9 +176,9 @@ class APL:
             elif ch == ';':
                 pairs.append((self.ctab['LST'], ch))   # Subscript list separator
             elif ch == ':':
-                pairs.append((self.ctab['CLN'], ch))   # Expression list separator
+                pairs.append((self.ctab['CLN'], ch))   # Colon for guard
             elif ch == '⋄':
-                pairs.append((self.ctab['XL'], ch))    # Colon for guard
+                pairs.append((self.ctab['XL'], ch))    # Expression list separator
             elif ch == '.':
                 pairs.append((self.ctab['DOT'], ch))   # Dot: ref / product
             elif ch == '←':
@@ -220,6 +221,18 @@ class APL:
         """
         return (self.bcats[self.lbs.index(bracket)], bracket)
     
+    def classify_name(self, name: Any) -> int:
+        if _name_is_array(name):
+            return self.ctab['A']
+        
+        if _name_is_function(name):
+            return self.ctab['F']
+        
+        if _name_is_mop(name):
+            return self.ctab['MOP']
+
+        return self.ctab['DOP']
+            
     def bind(self, stream: tuple) -> tuple:
         """
         Bunda-Gerth reduction. Find the first reducible token pair from `stream`, 
@@ -235,7 +248,9 @@ class APL:
         if type(Aa) == int and Aa == Bb == -1: 
             # Partial parse; we can't reduce further. This is either a 
             # syntax error, or we've landed on a name that would need 
-            # looking up, or we have a diamond list of expressions.
+            # looking up.
+            # return R, # TODO: expressions? syntax errors?
+            # return self.parse2(_flat(stream[-1], [])) # TODO: this should not be needed :/
             return stream
         
         # Separate the tuples into categories and tokens
@@ -276,19 +291,37 @@ class APL:
         Aa, Bb, Cc = (eos, eos, *pairs, eos)[-3:] # 3-token window
         return self.bind((D_, Aa, Bb, Cc, eos))
     
+    def parse2(self, pairs):
+        """
+        Parser entrypoint
+        """
+        eos = -1
+        ll = [eos]+list(pairs[:-2])
+        if ll == [-1]:
+            D_ = -1
+        else: # Left cons list: ∆_←↑{⍺ ⍵}⍨/⌽eos,¯2↓pairs
+            D_ = tuple(reduce(lambda x, y: (x, y), ll)) # type: ignore 
+        Aa, Bb, Cc = (eos, eos, *pairs, eos)[-3:] # 3-token window
+        return self.bind((D_, Aa, Bb, Cc, eos))
+    
     def run(self, src: str) -> np.ndarray|Callable:
         """
         Interpreter entrypoint
         """
         tok = self.parse(src)
         if len(tok) == 1:
-            if tok[0][0] == 0:
+            if tok[0][0] == 0:   # Array
                 if type(tok[0][1]) == tuple and callable(tok[0][1][0]):
                     return tok[0][1][0](None, tok[0][1][1])
                 else:
-                    return tok[0][1]
+                    return Env.resolve(tok[0][1])
+            elif tok[0][0] == 2: # Name
+                return Env.resolve(tok[0][1])
                 
-        raise NotImplementedError(f"Unrecognized token: {tok}")
+        # If we have more than one token left, we have a set of 
+        # expressions separated by diamonds.
+          
+        raise NotImplementedError(f"Parse error: {tok}")
 
     def A_(self, rcat: int, C: int, b: Any, c: Any) -> tuple:
         """
@@ -319,7 +352,7 @@ class APL:
             raise NotImplementedError
         
         if C == self.ctab['XL']:            # A:XL -> 1 XL ⍝ Diamond
-            return (rcat, c) # Value of diamond list is value of last item
+            return (rcat, (b, c))
         
         raise NotImplementedError(f"Unknown category: {C}")
     
@@ -346,14 +379,60 @@ class APL:
             raise NotImplementedError('NYI ERROR: bracket axis')
         
         if C == self.ctab['XL']:       # F:XL -> 1 XL ⍝ Diamond
-            return (rcat, c) # Value of diamond list is value of last item
+            return (rcat, (b, c)) # Value of diamond list is value of last item
         
         raise NotImplementedError(f"Unknown category: {C}")
 
     def N_(self, rcat: int, C: int, b: Any, c: Any) -> tuple:
         """
-        Left node is name.
+        Left node is name, which is a reference to either an array (a←4 5 5) or something
+        callable (e.g. a←+/).
+
+        We've made the decision to enforce BQN's variable naming conventions to be able to 
+        resolve this at parse time. 
+
+            1. Array references must start with a lower-case letter:
+
+                a←4 5 5                     ⍝ An array reference
+                hello_world ← 'hello world' ⍝ An array reference 
+
+            2. Function references start with an upper-case letter:
+
+                Sum ← +/                    ⍝ A function reference    
+                Sum2 ← {+/⍵}                ⍝ A function reference
+
+            3. References to monadic operators must start with an underscore, followed by
+               an upper-case letter:
+
+                _Mop ← {...⍺⍺...}           ⍝ A monadic operator reference
+
+            3. References to dyadic operators must start with an underscore, followed by
+               an upper-case letter, and end with an underscore:
+
+                _Dop_ ← {...⍺⍺..⍵⍵...}      ⍝ A dyadic operator reference 
+
         """
+        # The assignment is the only one we must delay the 
+        # resolving of the left node for...
+        if C == self.ctab['ARO']:            # N:ARO -> 11 ASG  ⍝ Assign: n←
+            return (rcat, curried_assign(b))
+        
+        # ...whereas for all the others we should be able to
+        # resolve the left node.
+        # reftype = self.classify_name(b)
+        # ref = Env.resolve(b)
+        # if reftype == self.ctab['A']:
+        #     return self.A_(reftype, C, ref, c)
+        
+        # if reftype == self.ctab['F']:
+        #     return self.F_(reftype, C, ref, c)
+        
+        # if reftype == self.ctab['MOP']:
+        #     return self.MOP_(reftype, C, ref, c) 
+
+        # if reftype == self.ctab['DOP']:
+        #     return self.DOP_(reftype, C, ref, c) 
+
         if C == self.ctab['N']:        # N:N -> 9 N  ⍝ Name stranding
             return (rcat, strand(b, c))
         
@@ -370,12 +449,8 @@ class APL:
         if C == self.ctab['XAS']:       # N:XAS -> 10 ASG  ⍝ Indexed assign: n[x]←
             raise NotImplementedError('NYI ERROR: indexed assign')
         
-        if C == self.ctab['XL']:       # N:XL -> 1 XL ⍝ Diamond
-            return (rcat, c) # Value of diamond list is value of last item
-        
-        if C == self.ctab['ARO']:       # N:ARO -> 11 ASG  ⍝ Assign: n←
-            Env.set(b, c)
-            return (rcat, c) # How do we do shy?
+        if C == self.ctab['XL']:       # N:XL -> 1 XL ⍝ Diamond
+            return (rcat, (b, c))
                     
         raise NotImplementedError(f"Unknown category: {C}")
     
@@ -396,10 +471,32 @@ class APL:
             return (rcat, derive_function(_fun_ref(b), Voc.get_mop(c)))
         
         if C == self.ctab['XL']:       # AF:XL -> 1 XL ⍝ Diamond
-            return (rcat, c) # Value of diamond list is value of last item
+            return (rcat, (b, c))
         
         raise NotImplementedError(f"Unknown category: {C}")
 
+    def ASG_(self, rcat: int, C: int, b: Callable, c: Any) -> tuple:
+        """
+        Left node is a name assignment `a←`
+        """
+        if C in {
+            self.ctab['A'],   self.ctab['F'],   self.ctab['N'], 
+            self.ctab['H'],   self.ctab['AF'],  self.ctab['JOT'], 
+            self.ctab['DOT'], self.ctab['MOP'], self.ctab['DOP']
+        }:
+            assert callable(b)
+            return (rcat, b(c))
+        
+        raise NotImplementedError(f"Unknown category: {C}")
+    
+    def XL_(self, rcat: int, C: int, b: Callable, c: Any) -> tuple:
+        """
+        Left node is an expression list ...⋄...
+        """
+        if C in {self.ctab['A'], self.ctab['XL']}:
+            return (rcat, (b, c))
+        
+        raise NotImplementedError(f"Unknown category: {C}")
     
     def eval(self, B: int, C: int, b: Any, c: Any) -> tuple:
         """
@@ -422,9 +519,35 @@ class APL:
         #---------- LEFT IS CURRIED DYAD ----------
         elif B == self.ctab['AF']:
             return self.AF_(rcat, C, b, c)
+        
+        #---------- LEFT IS NAME ASSIGNMENT -------
+        elif B == self.ctab['ASG']:
+            return self.ASG_(rcat, C, b, c)
+        
+        #---------- LEFT IS EXPRESSION LIST ------
+        elif B == self.ctab['XL']:
+            return self.XL_(rcat, C, b, c)
                 
         # return (rcat, (b, c))
         raise NotImplementedError(f"Unknown category: {B}")
+
+def _name_is_array(name: Any) -> bool:
+    return type(name) == str and name[0].islower()
+
+def _name_is_function(name: Any) -> bool:
+    return type(name) == str and name[0].isupper()
+
+def _name_is_mop(name: Any) -> bool:
+    return type(name) == str and len(name) > 1 and name[0] == '_' and name[1].isupper() and name[-1] != '_'
+
+def _name_is_dop(name: Any) -> bool:
+    return type(name) == str and len(name) > 1 and name[0] == '_' and name[1].isupper() and name[-1] == '_'
+
+def _flat(l, acc):
+    if l == (-1, -1):
+        return acc
+    acc.append(l[0])
+    return _flat(l[1], acc)
 
 def _simple_scalar(e: Any) -> bool:
     return isinstance(e, (int, float, complex, str))
@@ -444,6 +567,17 @@ def _ensure_array(a: Any) -> np.ndarray:
         return a
     return np.array(a)
             
+def curried_assign(a: str) -> Callable:
+    return lambda val: assign(a, val)
+
+def assign(a: str, b: Callable|APLTYPE) -> Callable|APLTYPE:
+    """
+    a ← b
+    """
+    assert(type(a) == str)
+    Env.set(a, b) # type: ignore 
+    return b
+
 def strand(left: tuple|APLTYPE, right: tuple|APLTYPE) -> np.ndarray:
     # Flat strand of two simple scalars: 1 2
     if _simple_scalar(left) and _simple_scalar(right): 
@@ -527,7 +661,9 @@ def subscript_list(left: tuple, right: tuple) -> tuple:
     return left, *right
 
 def apply(left: Callable, right: np.ndarray) -> np.ndarray:
-    return left(None, right)
+    v = left(None, right)
+    print(f"Applying {left} to {right}: {v}")
+    return v
 
 def atop(left: Callable, right: Callable) -> Callable:
     """

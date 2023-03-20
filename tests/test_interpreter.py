@@ -134,10 +134,14 @@ primitives = [
 def test_primitives(test_input, expected):
     assert nested_array_equal(run(test_input), expected)
 
-# gets = [
-#     ("a←5⋄a", 5),
-# ]
+gets = [
+    # ("a←5", np.array(5)), # TODO: fix shy!
+    # ("a←5⋄a", 5),
+    # ("b←a←5⋄b", 5),
+    ("a←5⋄5+1", 6),
+    #  ("a+b+c", 10),
+]
 
-# @pytest.mark.parametrize("test_input,expected", gets)
-# def test_gets(test_input, expected):
-#     assert nested_array_equal(run(test_input), expected)
+@pytest.mark.parametrize("test_input,expected", gets)
+def test_gets(test_input, expected):
+    assert nested_array_equal(run(test_input), expected)
