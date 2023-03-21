@@ -174,7 +174,7 @@ class APL:
             elif ch == '∘':
                 pairs.append((self.ctab['JOT'], ch))   # Jot: compose / null operand
             elif ch == ';':
-                pairs.append((self.ctab['LST'], ch))   # Subscript list separator
+                pairs.append((self.ctab['SL'], ch))    # Subscript list separator
             elif ch == ':':
                 pairs.append((self.ctab['CLN'], ch))   # Colon for guard
             elif ch == '⋄':
@@ -183,8 +183,8 @@ class APL:
                 pairs.append((self.ctab['DOT'], ch))   # Dot: ref / product
             elif ch == '←':
                 pairs.append((self.ctab['ARO'], ch))   # Assignment arrow
-            elif ch in '⍺⍵':
-                pairs.append((0, ch))                  # Dfn arg arrays
+            elif ch in '⍺⍵#':
+                pairs.append((0, ch))                  # Dfn arg arrays and root ns
             i += 1
         return pairs
     
