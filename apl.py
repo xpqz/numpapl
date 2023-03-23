@@ -258,8 +258,8 @@ class APL:
         B, b = _unpack(Bb)
         C, c = _unpack(Cc)
 
-        if f'{a}{b}' in self.bkt_pairs[1:]: # Empty brackets [] {}
-            return self.bind((rgt((D_, L)), Aa, self.ebk(b), R, _D)) # rgt(∆_ L)Aa(ebk b)R _∆
+        if f'{b}{c}' in self.bkt_pairs[1:]: # Empty brackets [] {}
+            return self.bind((rgt(((D_, L), Aa, self.ebk(b), R, _D)))) # rgt(∆_ L)Aa(ebk b)R _∆
         
         if f'{a}{c}' in self.bkt_pairs: # Bracketed single value Bb
             return self.bind(rgt((D_, L, self.bkt(a, Bb), R, _D)))  # (⊂a c)∊bkts:∇ rgt ∆_ L(a bkt Bb)R _∆

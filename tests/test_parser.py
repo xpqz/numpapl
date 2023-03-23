@@ -43,13 +43,6 @@ test_data = [
     ("1 - 2 - 3 - 4", "((0, ((1, '-'), ((2, '-'), ((3, '-'), 4)))),)"),
     ("(1 2 3)(4 5 6)", "((0, (('(', ((1, 2), 3)), ('(', ((4, 5), 6)))),)"),
     ("(1 2 3)4", "((0, (('(', ((1, 2), 3)), 4)),)"),
-]
-
-@pytest.mark.parametrize("test_input,expected", test_data)
-def test_eval(test_input, expected):
-    assert parse_only(test_input) == expected
-
-diamond_data = [
     ("1⋄2", "((0, ((1, '⋄'), 2)),)"),
     ("x←1⋄2+3", "((0, (((('x', '←'), 1), '⋄'), ((2, '+'), 3))),)"),
 
@@ -65,13 +58,6 @@ diamond_data = [
     # │  │  │  │└──┴──────────┘│└───┴──────────────┘│
     # └──┴──┴──┴───────────────┴────────────────────┘
     ("x←1⋄x+3", "(-1, -1, -1, (15, ((('x', '←'), 1), '⋄')), ((2, 'x'), ((0, ('+', 3)), (-1, -1))))"), 
-]
-
-@pytest.mark.parametrize("test_input,expected", diamond_data)
-def test_diamond(test_input, expected):
-    assert parse_only(test_input) == expected
-
-dfns_data = [
     ('1+2-3×4÷5', "((0, ((1, '+'), ((2, '-'), ((3, '×'), ((4, '÷'), 5))))),)"), # dyadic functions and arrays
     ('1+-×÷5', "((0, ((1, '+'), ('-', ('×', ('÷', 5))))),)"), # monadic functions
     ('+∘×¨2+3', "((0, ((('+', ('∘', '×')), '¨'), ((2, '+'), 3))),)"), # operator-function binding
@@ -94,9 +80,6 @@ dfns_data = [
     ('↑⍣∘', "((1, ('↑', ('⍣', '∘'))),)"), # disclose limit.
     ('∘.+', "((1, ('∘', ('.', '+'))),)"), # outer product vs. compose
     ('+∘1', "((1, ('+', ('∘', 1))),)"), # outer product vs. compose
-
-    # ('# #.a[1]', ""), # FIXME: FAIL: strand vs dot vs index. 
-
     ('x←2 3', "((0, (('x', '←'), (2, 3))),)"), # array naming.
     ('y←+.×', "((1, (('y', '←'), ('+', ('.', '×')))),)"), # function naming.
     ('z←¨', "((8, (('z', '←'), '¨')),)"), # mop naming.
@@ -109,9 +92,6 @@ dfns_data = [
     ('x y', "((2, ('x', 'y')),)"), # name stranding.
     ('(x y)←3 4', "((0, ((('(', ('x', 'y')), '←'), (3, 4))),)"), # struct naming.
     ('(x(y z))←(1 2)3', "((0, ((('(', ('x', ('(', ('y', 'z')))), '←'), (('(', (1, 2)), 3))),)"), # struct naming.
-
-    # ('a x←3', ""), # FIXME: FAIL: stranding with naming.
-
     ('(x←+)(y←/)(z←3)', "((0, ((('(', (('x', '←'), '+')), ('(', (('y', '←'), '/'))), ('(', (('z', '←'), 3)))),)"), # naming en-passant.
     ('x←1:2⋄3', "((0, (((((('x', '←'), 1), ':'), 2), '⋄'), 3)),)"), # naming guard condition
     ('x←(1:2⋄3)', "((0, (('x', '←'), ('(', ((((1, ':'), 2), '⋄'), 3)))),)"), # naming guard expression
@@ -142,26 +122,15 @@ dfns_data = [
     ('⍣⋄0', "((0, (('⍣', '⋄'), 0)),)"), # expression lists
     ('∘⋄0', "((0, (('∘', '⋄'), 0)),)"), # expression lists
     ('.⋄0', "((0, (('.', '⋄'), 0)),)"), # expression lists
-
     ('[ ;;]', "((10, ('[', (';', ';'))),)"), # subscripts
     ('[ ;;3]', "((10, ('[', ((';', ';'), 3))),)"), # subscripts
     ('[ ;2;]', "((10, ('[', ((';', 2), ';'))),)"), # subscripts
     ('[ ;2;3]', "((10, ('[', (((';', 2), ';'), 3))),)"), # subscripts
-
-    # ('()', ""), # empty brackets FIXME: FAIL: 
-    # ('[]', ""), # empty brackets FIXME: FAIL:
-    # ('{}', ""), # empty brackets FIXME: FAIL:
-
     ('⍵[;;]', "((0, ('⍵', ('[', (';', ';')))),)"), # decreasing rank
     ('⍵[;]', "((0, ('⍵', ('[', ';'))),)"), # decreasing rank
-    # ('⍵[]', ""), # decreasing rank FIXME: FAIL: 
-
     ('a[1][2][3]', "((2, ((('a', ('[', 1)), ('[', 2)), ('[', 3))),)"), # contiguous IDXs.
     ('x[2]←0', "((0, (('x', (('[', 2), '←')), 0)),)"), # indexed assignment
     ('[0]←', "((11, (('[', 0), '←')),)"), # partial indexed assignment
-
-    # ('a x[2]←0', ""), # stranding with indexed assignment. FIXME: FAIL
-
     ('(x y)[0]←1', "((0, ((('(', ('x', 'y')), (('[', 0), '←')), 1)),)"), # selective assignment.
     ('1/[0]⍵', "((0, ((1, ('/', ('[', 0))), '⍵')),)"), # hybrid-fn axis
     ('+/[0]⍵', "((0, ((('+', '/'), ('[', 0)), '⍵')),)"), # derived-fn axis
@@ -183,13 +152,25 @@ dfns_data = [
     ('+/×', "((1, (('+', '/'), '×')),)"), # 2-train
     ('+(/∘⊢)×', "((1, (('+', ('(', ('/', ('∘', '⊢')))), '×')),)"), # 3-train
     ('∘', "((5, '∘'),)"), # single token.
-    # ('()', ""), # null expression: error.
     ('(((3)))', "((0, ('(', ('(', ('(', 3)))),)"), # deep parentheses.
-    # ('#.a #.(b+1) #.#.c + 2', ""), # lotsa dots. FIXME: FAIL:
     ('{⍵=1:1 ⋄ 2|⍵:∇ 1+3×⍵ ⋄ ∇ ⍵÷2}', "((1, ('{', (((((((('⍵', '='), 1), ':'), 1), '⋄'), ((((2, '|'), '⍵'), ':'), ('∇', ((1, '+'), ((3, '×'), '⍵'))))), '⋄'), ('∇', (('⍵', '÷'), 2))))),)"), # →osc← function
-    # ('x←3 4⍴⍳5 ⋄ #.a ∘.+ b[⍳3;] +.× ∘.{(+/⍵)÷⍴⍵}⍨ c', ""), # complex expression FIXME: FAIL:
+
+    #     ⍕try¨ '()' '[]' '{}'  ⍝ empty brackets
+    #  ┌─┬─┐  IDX  F 
+    #  │(│)│  [    { 
+    #  └─┴─┘         
+    
+    ('()', "(-1, -1, -1, (-1, '('), ((-1, ')'), (-1, -1)))"), # empty brackets: note this is a SYNTAX ERROR
+    ('[]', "((10, '['),)"), # empty brackets []
+    ('{}', "((1, '{'),)"), # empty brackets {}
+    ('⍵[]', "((0, ('⍵', '[')),)"), # decreasing rank
+    ('⍵ x←3', "((0, ('⍵', (('x', '←'), 3))),)"), # stranding with naming.
+    ('# #.⍵[1]', "((0, (('#', (('#', '.'), '⍵')), ('[', 1))),)"), # strand vs dot vs index. 
+    ('⍵ x[2]←0', "((0, ('⍵', (('x', (('[', 2), '←')), 0))),)"), # stranding with indexed assignment. 
+    ('#.⍵ #.(⍵+1) #.#.⍵ + 2', "((0, (((((('#', '.'), '⍵'), (('#', '.'), ('(', (('⍵', '+'), 1)))), (('#', '.'), (('#', '.'), '⍵'))), '+'), 2)),)"), # lotsa dots.
+    ('x←3 4⍴⍳5 ⋄ #.⍵ ∘.+ ⍺[⍳3;] +.× ∘.{(+/⍵)÷⍴⍵}⍨ ⍺', "((0, (((('x', '←'), (((3, 4), '⍴'), ('⍳', 5))), '⋄'), (((('#', '.'), '⍵'), ('∘', ('.', '+'))), ((('⍺', ('[', (('⍳', 3), ';'))), ('+', ('.', '×'))), ((('∘', ('.', ('{', ((('(', (('+', '/'), '⍵')), '÷'), ('⍴', '⍵'))))), '⍨'), '⍺'))))),)"), # complex expression
 ]
 
-@pytest.mark.parametrize("test_input,expected", dfns_data)
-def test_dfns(test_input, expected):
+@pytest.mark.parametrize("test_input,expected", test_data)
+def test_parse(test_input, expected):
     assert parse_only(test_input) == expected
