@@ -1,10 +1,11 @@
 import pytest 
 
-from apl import APL
+from aplparser import APL
 
 def parse_only(src):
-    p = APL(parse_only=True)
-    ast = p.parse(src)
+    p = APL()
+    tokens = p.tokenise(src)
+    ast = p.parse(tokens)
 
     if ast is None:
         return None
