@@ -14,6 +14,10 @@ class Env:
     @classmethod
     def system_arrs(cls) -> set[str]:
         return {'⎕IO', '⎕A', '⎕D'}
+    
+    @classmethod
+    def system_funs(cls) -> set[str]:
+        return {'⎕R', '⎕S'}
 
     @classmethod
     def append(cls, env: dict) -> None:

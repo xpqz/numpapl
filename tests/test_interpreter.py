@@ -2,7 +2,7 @@ import math
 import numpy as np
 import pytest 
 
-from apl import APL
+from aplparser import APL
 import arr
 
 def nested_array_equal(a, b):

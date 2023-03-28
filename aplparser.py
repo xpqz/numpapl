@@ -17,7 +17,7 @@ In a typical APL interpreter, the boundary between parsing and
 interpretation is a bit blurry. The 'grammar' isn't context-free.
 The reduction step in the Bunda-Gerth algorithm is the point 
 where an expression can be evaluated, so there is no need to 
-build an explicit AST.
+build an explicit AST (although we do!)
 
 """
 from functools import reduce
@@ -43,25 +43,25 @@ class APL:
         # Note: the ordering is significant! The Bunda-Gerth binding tables 
         # below rely on this order.
         self.cats = [
-            'A',   # Arrays
-            'F',   # Functions
-            'N',   # Names (unassigned)
-            'H',   # Hybrid function/operators
-            'AF',  # Functions with curried left argument
-            'JOT', # Compose/null operand
-            'DOT', # Reference/product
-            'DX',  # Dotted ...
-            'MOP', # Monadic operators
-            'DOP', # Dyadic operators
-            'IDX', # Bracket indexing/axis specification
-            'XAS', # Indexed assignment [IDX]←
-            'SL',  # Subscript list ..;..;..
-            'CLN', # Colon token
-            'GRD', # Guard
-            'XL',  # Expression list ..⋄..⋄..
-            'ARO', # Assignment arrow ←
-            'ASG', # Name assignment
-            'ERR'  # Error
+            'A',   # 0: Arrays
+            'F',   # 1: Functions
+            'N',   # 2: Names (unassigned)
+            'H',   # 3: Hybrid function/operators
+            'AF',  # 4: Functions with curried left argument
+            'JOT', # 5: Compose/null operand
+            'DOT', # 6: Reference/product
+            'DX',  # 7: Dotted ...
+            'MOP', # 8: Monadic operators
+            'DOP', # 9: Dyadic operators
+            'IDX', # 10: Bracket indexing/axis specification
+            'XAS', # 11: Indexed assignment [IDX]←
+            'SL',  # 12: Subscript list ..;..;..
+            'CLN', # 13: Colon token
+            'GRD', # 14: Guard
+            'XL',  # 15: Expression list ..⋄..⋄..
+            'ARO', # 16: Assignment arrow ←
+            'ASG', # 17: Name assignment
+            'ERR'  # 18: Error
         ]
 
         # Lookup table for category indexing.
@@ -126,6 +126,25 @@ class APL:
             [ 0,  1,  2,  3,  4,  5,  9,  0,  8,  9,  0,  0,  0,  0,  0,  0,  0,  0,  0],
             [ 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
         ])
+
+        # BEGIN{HACK} -- these should be transcribed into the BG tables proper.
+        # Note: this means that some syntactically incorrect expressions won't be
+        #       detected at parse time, but only at runtime.
+
+        # Make the A node also behave like a Name instead of using the Name node.
+        self.bmat[(0, 11)] = self.bmat[(2, 11)]
+        self.bmat[(0, 16)] = self.bmat[(2, 16)]
+
+        self.zmat[(0, 11)] = self.zmat[(2, 11)]
+        self.zmat[(0, 16)] = self.zmat[(2, 16)]
+
+        # Make the F node also behave like a Name instead of using the Name node.
+        self.bmat[(1, 11)] = self.bmat[(2, 11)]
+        self.bmat[(1, 16)] = self.bmat[(2, 16)]
+
+        self.zmat[(1, 11)] = self.zmat[(2, 11)]
+        self.zmat[(1, 16)] = self.zmat[(2, 16)]
+        # END{HACK}
 
         # Extended bmat: pad with zeros in x and y
         self.xmat = np.pad(self.bmat, ((1, 1), (1, 1)), 'constant') 
@@ -217,10 +236,10 @@ class APL:
         return (self.bcats[self.lbs.index(bracket)], bracket)
     
     def classify_name(self, name: Any) -> int:
-        if _name_is_array(name):
+        if _name_is_array(name) or name in Env.system_arrs():
             return self.ctab['A']
         
-        if _name_is_function(name):
+        if _name_is_function(name) or name in Env.system_funs():
             return self.ctab['F']
         
         if _name_is_mop(name):
