@@ -2,7 +2,7 @@ import math
 import numpy as np
 import pytest 
 
-from aplparser import APL
+from aplinterp import Interpreter
 import arr
 
 def nested_array_equal(a, b):
@@ -20,7 +20,11 @@ def nest(shape: tuple, arr: list[list|int]) -> np.ndarray:
     return a.reshape(shape)
 
 def run(src):
-    return(APL().run(src))
+
+    i = Interpreter(src)
+    r = i.visit()
+
+    return r[1]
 
 scalar_arithmetic = [
     ("+2", 2),

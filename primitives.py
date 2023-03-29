@@ -353,7 +353,13 @@ def reduce(left: np.ndarray|Callable, right: Optional[np.ndarray|Callable], alph
         raise NYIError("left argument for function derived by '/' is not implemented yet")
 
     assert callable(left)
-    return arr.foldr(omega, operand=left, axis=omega.ndim-1)
+    o = _at_least_vector(omega)
+    return arr.foldr(o, operand=left, axis=max(0, o.ndim-1))
+
+def _at_least_vector(a: np.ndarray) -> np.ndarray:
+    if a.ndim == 0:
+        return a.copy().reshape((1,))
+    return a
 
 def reduce_first(left: np.ndarray|Callable, right: Optional[np.ndarray|Callable], alpha: Optional[np.ndarray], omega: np.ndarray) -> np.ndarray:
     """
@@ -366,7 +372,8 @@ def reduce_first(left: np.ndarray|Callable, right: Optional[np.ndarray|Callable]
         raise NYIError("left argument for function derived by '⌿' is not implemented yet")
 
     assert callable(left)
-    return arr.foldr(omega, operand=left, axis=0)
+    o = _at_least_vector(omega)
+    return arr.foldr(o, operand=left, axis=0)
 
 def fun_gets(left: np.ndarray|Callable, right: Optional[np.ndarray|Callable], alpha: Optional[np.ndarray|str], omega: np.ndarray) -> np.ndarray:
     """

@@ -67,6 +67,12 @@ class APL:
         # Lookup table for category indexing.
         self.ctab = dict([(c, i) for (i, c) in enumerate(self.cats)])
 
+        self.rval = { # Nodes that can form the right-hand side of an assignment.
+            self.ctab['A'],   self.ctab['F'],   self.ctab['N'], 
+            self.ctab['H'],   self.ctab['AF'],  self.ctab['JOT'], 
+            self.ctab['DOT'], self.ctab['MOP'], self.ctab['DOP']
+        }
+
         # Brackets
         self.bkts = '()[]{}'
         self.bkt_pairs = ['()', '[]', '{}']
@@ -282,9 +288,9 @@ class APL:
         if self.xmat[(A+1, B+1)] >= self.xmat[(B+1, C+1)]: # A:B ≥ B:C → skip left.
             return self.bind(lft(stream)) 
         
-        BbCc = (self.zmat[(B, C)], (b, c)) # BbCc←zmat[B;C],⊂b c ⍝ B bound with C.
+        # BbCc = (self.zmat[(B, C)], (b, c)) # BbCc←zmat[B;C],⊂b c ⍝ B bound with C.
 
-        # BbCc = (self.zmat[(B, C)], (Bb, Cc)) # Retain node type info
+        BbCc = (self.zmat[(B, C)], (Bb, Cc)) # Retain node type info
 
         return self.bind(((D_, L), Aa, BbCc, R, _D)) # Binds with token to the right?
     
