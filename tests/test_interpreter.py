@@ -20,10 +20,8 @@ def nest(shape: tuple, arr: list[list|int]) -> np.ndarray:
     return a.reshape(shape)
 
 def run(src):
-
     i = Interpreter(src)
     r = i.visit()
-
     return r[1]
 
 scalar_arithmetic = [
@@ -148,4 +146,15 @@ gets = [
 
 @pytest.mark.parametrize("test_input,expected", gets)
 def test_gets(test_input, expected):
+    assert nested_array_equal(run(test_input), expected)
+
+strand_data = [
+    ("1 2 3", np.array([1, 2, 3])),
+    ("(1 2)3", np.array([np.array([1, 2]), np.array(3)], dtype=object)),
+    ("(1 2)(3 4)", nest((2,), [[1, 2], [3, 4]])),
+    ("(1 2 3)(4 5 6)", nest((2,), [[1, 2, 3], [4, 5, 6]])),
+]
+
+@pytest.mark.parametrize("test_input,expected", strand_data)
+def test_stranding(test_input, expected):
     assert nested_array_equal(run(test_input), expected)

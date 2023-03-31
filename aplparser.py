@@ -33,7 +33,8 @@ from primitives import Voc
 APLTYPE: TypeAlias = np.ndarray|int|float|complex|str
 
 class APL:
-    def __init__(self):
+    def __init__(self, debug = False):
+        self.debug = debug
         self.functions = '+-×÷*=≥>≠∨∧⍒⍋⌽⍉⊖⍟⍱⍲!?∊⍴~↑↓⍳○*⌈⌊∇⍎⍕⊃⊂∩∪⊣⊢⊥⊤|≡≢,⍪⊆⌹'
         self.hybrids = '/⌿\⍀'
         self.monadic_operators = '⌸¨⍨'
@@ -288,9 +289,10 @@ class APL:
         if self.xmat[(A+1, B+1)] >= self.xmat[(B+1, C+1)]: # A:B ≥ B:C → skip left.
             return self.bind(lft(stream)) 
         
-        # BbCc = (self.zmat[(B, C)], (b, c)) # BbCc←zmat[B;C],⊂b c ⍝ B bound with C.
-
-        BbCc = (self.zmat[(B, C)], (Bb, Cc)) # Retain node type info
+        if self.debug:
+            BbCc = (self.zmat[(B, C)], (b, c)) # BbCc←zmat[B;C],⊂b c ⍝ B bound with C.
+        else:
+            BbCc = (self.zmat[(B, C)], (Bb, Cc)) # Retain node type info
 
         return self.bind(((D_, L), Aa, BbCc, R, _D)) # Binds with token to the right?
     

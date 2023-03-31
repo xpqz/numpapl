@@ -14,7 +14,6 @@ class Interpreter:
         self.tokens = self.parser.tokenise(src)
         self.ast = self.parser.parse(self.tokens)
 
-
     def visit(self, node: Optional[tuple] = None) -> tuple:
         """
         Interpreter entrypoint.
@@ -34,59 +33,55 @@ class Interpreter:
             return self.visit_hybrid(payload[1])
         elif node_type == self.parser.ctab['AF']:
             return self.visit_af(payload[1])
-        # elif node_type == self.parser.ctab['DOT']:
-        #     return self.visit_dot(payload[1])
-        # elif node_type == self.parser.ctab['MOP']:
-        #     return self.visit_monadic_op(payload[1])
-        # elif node_type == self.parser.ctab['IDX']:
-        #     return self.visit_array_index(payload[1])
-        # elif node_type == self.parser.ctab['SL']:
-        #     return self.visit_subscript_list(payload[1])
-        # elif node_type == self.parser.ctab['CLN']:
-        #     return self.visit_colon(payload[1])
-        # elif node_type == self.parser.ctab['GRD']:
-        #     return self.visit_guard(payload[1])
-        # elif node_type == self.parser.ctab['XL']:
-        #     return self.visit_diamond(payload[1])
+
         raise NotImplementedError(f"Unknown node type: {node_type}")
 
     def visit_array(self, node: APLTYPE|tuple) -> tuple:
         """
         Make an array
         """
-        arr_cat = self.parser.ctab['A']
         if not isinstance(node, tuple):
-            return (arr_cat, node)
+            return (self.parser.ctab['A'], node)
         
-        left = self.visit(node[0])
-        right = self.visit(node[1])
+        if node[0] == '(':
+            left = self.visit(node[1][0])
+            right = self.visit(node[1][1])
+            result_type = '('
+        else:
+            left = self.visit(node[0])
+            right = self.visit(node[1])
+            result_type = self.parser.ctab['A']
 
         B, b = left
         C, c = right
 
-        if B == arr_cat:                                    # Left node is array.
-            if C == arr_cat:                                # A:A -> 9 A  ⍝ Strand
-                return (arr_cat, strand(b, c))
+        if B == "(" or C == "(":
+            return ('(', strand(b, c, nest=True))
+
+        if B == self.parser.ctab['A']:                        # Left node is array.
+            if C == self.parser.ctab['A']:                    # A:A -> 9 A  ⍝ Strand
+                return (result_type, strand(b, c))
+                
             if C == self.parser.ctab['IDX']:                # A:IDX -> 8 A ⍝ Array bracket index
-                return (arr_cat, array_index(b, c))
+                return (self.parser.ctab['A'], array_index(b, c))
             
-        elif B == self.parser.ctab['F'] and C == arr_cat:   # Left node is function
-            return (arr_cat, apply(_fun_ref(b), _payload(c)))         # F:A -> 6 A  ⍝ Monadic function application
+        elif B == self.parser.ctab['F'] and C == self.parser.ctab['A']:   # F:A -> 6 A  ⍝ Monadic function application
+            return (self.parser.ctab['A'], apply(_fun_ref(b), _payload(c))) # type: ignore
         
-        elif B == self.parser.ctab['AF'] and C == arr_cat:  # Left node is curried dyadic function.      
-            return (arr_cat, apply(_fun_ref(b), c))         # AF:A -> 6 A  ⍝ Monadic function application
+        elif B == self.parser.ctab['AF'] and C == self.parser.ctab['A']:  # Left node is curried dyadic function.      
+            return (self.parser.ctab['A'], apply(_fun_ref(b), c))         # AF:A -> 6 A  ⍝ Monadic function application
         
-        elif B == self.parser.ctab['GRD'] and C == arr_cat: # Left node is a guard statement.      
+        elif B == self.parser.ctab['GRD'] and C == self.parser.ctab['A']: # Left node is a guard statement.      
             raise NotImplementedError(f'GRD:A -> 2 A')      # GRD:A -> 2 A  ⍝ Guard statement
         
-        elif B == self.parser.ctab['XL'] and C == arr_cat:  # Left node is an expression list     
+        elif B == self.parser.ctab['XL'] and C == self.parser.ctab['A']:  # Left node is an expression list     
             return right                                    # XL:A -> 1 A  ⍝ TODO: is this right? Diamond
         
         elif B == self.parser.ctab['ASG'] and C in self.parser.rval: # Left node is a name assignment `a←`
             assert callable(b)
-            return (arr_cat, b(c))                          # ASG:A -> 1 A
+            return (self.parser.ctab['A'], b(c))                          # ASG:A -> 1 A
 
-        raise NotImplementedError(f"Unknown array category: {left[0]}")
+        raise NotImplementedError(f"[visit_array] Unknown array category: {left[0]}")
         
     def visit_function(self, node: APLTYPE|tuple) -> tuple:
         """
@@ -453,50 +448,26 @@ def assign(a: str, b: Callable|APLTYPE) -> Callable|APLTYPE:
     Env.set(a, b) # type: ignore 
     return b
 
-def strand(left: tuple|APLTYPE, right: tuple|APLTYPE) -> np.ndarray:
-    # Flat strand of two simple scalars: 1 2
-    if _simple_scalar(left) and _simple_scalar(right): 
-        return np.hstack((left, right)) 
-    
-    # Flat strand of more than two simple scalars: 1 2 3
-    if type(left) == np.ndarray and _simple_scalar(right):
-        return np.hstack((left, right))
-    
-    if _simple_scalar(left) and type(right) == np.ndarray:
-        return np.hstack((left, right))
-    
-    if type(left) == tuple and type(right) == tuple:
-        # Flat, bracketed, strand of two simple scalars: (1)(2)
-        if _simple_scalar(left[1]) and _simple_scalar(right[1]):
-            return np.hstack((left[1], right[1]))
-        else: # Bracketed arrays, e,g (1 2 3)(4 5 6) or (1 2 3)4
-            nested = np.empty(2, dtype=object)
-            nested[:] = [_payload(left[1]), _payload(right[1])] # type: ignore
-            return nested
-        
-    if type(left) == tuple:
-        if type(right) == tuple:
-            # Flat, bracketed, strand of two simple scalars: (1)(2)
-            if _simple_scalar(left[1]) and _simple_scalar(right[1]):
-                return np.hstack((left[1], right[1]))    
-            # Bracketed arrays, e,g (1 2 3)(4 5 6)
-            nested = np.empty(2, dtype=object)
-            nested[:] = [_payload(left[1]), _payload(right[1])] # type: ignore
-            return nested
-        else:
-            nested = np.empty(2, dtype=object)
-            nested[:] = [_payload(left[1]), _payload(right)] # type: ignore
-            return nested
-    else:
-        if type(right) == tuple:
-            nested = np.empty(2, dtype=object)
-            nested[:] = [_payload(left), _payload(right[1])] # type: ignore
-            return nested
-        else:
-            nested = np.empty(2, dtype=object)
-            nested[:] = [_payload(left), _payload(right)] # type: ignore
-            return nested
+def strand(left: APLTYPE, right: APLTYPE, nest = False) -> np.ndarray:
+    """
+    Strand two values to form a single vector, either by appending:
 
+        >>> strand(1, 2)
+        array([1, 2])
+
+    or nesting:
+
+        >>> strand(np.array([1, 2], np.array([3, 4]), True)
+        array([array([1, 2]), array([3, 4])], dtype=object)
+
+    """
+    if not nest:
+        return np.hstack((left, right))    
+    
+    nested = np.empty(2, dtype=object)
+    nested[:] = [_payload(left), _payload(right)]
+    return nested
+                
 def curry(left: np.ndarray, right: Callable) -> Callable:
     """
     Bind the left argument `left` to the dyadic function `right`, to give

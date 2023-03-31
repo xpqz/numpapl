@@ -4,7 +4,7 @@ import sys
 from aplparser import APL
 
 def parse_only(src):
-    p = APL()
+    p = APL(debug=True)
     tokens = p.tokenise(src)
     ast = p.parse(tokens)
 
@@ -14,4 +14,6 @@ def parse_only(src):
     return str(ast)
 
 
-print(parse_only(sys.argv[1]))
+ast = parse_only(sys.argv[1])
+
+print(ast)
