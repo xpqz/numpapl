@@ -55,9 +55,6 @@ class Interpreter:
         B, b = left
         C, c = right
 
-        if B == "(" or C == "(":
-            return ('(', strand(b, c, nest=True))
-
         if B == self.parser.ctab['A']:                        # Left node is array.
             if C == self.parser.ctab['A']:                    # A:A -> 9 A  ⍝ Strand
                 return (result_type, strand(b, c))
@@ -65,21 +62,23 @@ class Interpreter:
             if C == self.parser.ctab['IDX']:                # A:IDX -> 8 A ⍝ Array bracket index
                 return (self.parser.ctab['A'], array_index(b, c))
             
-        elif B == self.parser.ctab['F'] and C == self.parser.ctab['A']:   # F:A -> 6 A  ⍝ Monadic function application
+        elif B == self.parser.ctab['F'] and C in {self.parser.ctab['A'], '('}:   # F:A -> 6 A  ⍝ Monadic function application
             return (self.parser.ctab['A'], apply(_fun_ref(b), _payload(c))) # type: ignore
         
-        elif B == self.parser.ctab['AF'] and C == self.parser.ctab['A']:  # Left node is curried dyadic function.      
+        elif B == self.parser.ctab['AF'] and C in {self.parser.ctab['A'], '('}:  # Left node is curried dyadic function.      
             return (self.parser.ctab['A'], apply(_fun_ref(b), c))         # AF:A -> 6 A  ⍝ Monadic function application
         
-        elif B == self.parser.ctab['GRD'] and C == self.parser.ctab['A']: # Left node is a guard statement.      
+        elif B == self.parser.ctab['GRD'] and C in {self.parser.ctab['A'], '('}: # Left node is a guard statement.      
             raise NotImplementedError(f'GRD:A -> 2 A')      # GRD:A -> 2 A  ⍝ Guard statement
         
-        elif B == self.parser.ctab['XL'] and C == self.parser.ctab['A']:  # Left node is an expression list     
+        elif B == self.parser.ctab['XL'] and C in {self.parser.ctab['A'], '('}:  # Left node is an expression list     
             return right                                    # XL:A -> 1 A  ⍝ TODO: is this right? Diamond
         
         elif B == self.parser.ctab['ASG'] and C in self.parser.rval: # Left node is a name assignment `a←`
             assert callable(b)
-            return (self.parser.ctab['A'], b(c))                          # ASG:A -> 1 A
+            return (self.parser.ctab['A'], b(c))     # ASG:A -> 1 A
+        elif B == "(" or C == "(":
+            return ('(', strand(b, c, nest=True))                     
 
         raise NotImplementedError(f"[visit_array] Unknown array category: {left[0]}")
         
